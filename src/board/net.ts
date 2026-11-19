@@ -2,7 +2,7 @@
 // Worker over a WebSocket and reconnects on its own; LocalLink keeps the board
 // on this device (localStorage) and shares it between tabs, which is what
 // `npm run dev` uses when no Worker is running.
-import type { Effect, Item, Meta, Op, Person, Presence, ReactionKind, ServerMessage } from "../shared/types";
+import type { Access, AdminAct, DeniedReason, Effect, Item, Meta, Op, Person, Presence, ReactionKind, ServerMessage } from "../shared/types";
 import { BoardState } from "../shared/state";
 import { makeTemplate, type TemplateName } from "../shared/templates";
 import { randomId } from "../shared/ids";
@@ -14,6 +14,14 @@ export interface InitData {
   meta: Meta;
   items: Item[];
   people: (Person & { p?: Presence })[];
+  access: Access;
+}
+
+/** What a tab brings to open a board: the key from its link, the owner key, the pass for its password. */
+export interface BoardKeys {
+  key?: string;
+  owner?: string;
+  pass?: string;
 }
 
 export interface LinkEvents {
@@ -25,6 +33,16 @@ export interface LinkEvents {
   presence(pid: string, p: Presence): void;
   reaction(pid: string, kind: ReactionKind, x: number, y: number): void;
   status(status: LinkStatus): void;
+  /** What you may do changed (the owner set a password or made new links). */
+  access(access: Access): void;
+  /** The board wants its password. */
+  locked(info: { wrong?: boolean; wait?: number }): void;
+  /** The password was right: this pass opens the board next time. */
+  pass(token: string): void;
+  /** The board will not open for these keys, or is gone. The link has stopped. */
+  denied(why: DeniedReason, at?: string): void;
+  /** How one of the owner's controls went. */
+  done(act: AdminAct, ok: boolean, message?: string): void;
 }
 
 export interface Link {
@@ -32,6 +50,9 @@ export interface Link {
   ops(ops: Op[], fx?: Effect): void;
   presence(p: Presence): void;
   react(kind: ReactionKind, x: number, y: number): void;
+  unlock(pw: string): void;
+  admin(act: "password", pw: string | null): void;
+  admin(act: "links" | "delete"): void;
   close(): void;
 }
 
@@ -54,7 +75,9 @@ export class LiveLink implements Link {
   constructor(
     private boardId: string,
     private events: LinkEvents,
+    private keys: BoardKeys,
   ) {
+    this.keys = { ...keys };
     this.connect();
     addEventListener("online", () => this.retryNow());
     document.addEventListener("visibilitychange", () => {
@@ -80,7 +103,7 @@ export class LiveLink implements Link {
     this.ws = ws;
     ws.onopen = () => {
       this.retries = 0;
-      if (this.me) ws.send(JSON.stringify({ t: "hello", ...this.me }));
+      if (this.me) ws.send(JSON.stringify(this.helloMsg()));
       clearInterval(this.ping);
       this.ping = window.setInterval(() => this.raw({ t: "ping" }), 25_000);
     };
@@ -104,9 +127,42 @@ export class LiveLink implements Link {
     };
   }
 
+  /** Reconnect with the keys the board last gave: new links, or the owner key of a board from before keys. */
+  private learn(a: Access) {
+    const key = a.role === "viewer" ? a.view : a.edit;
+    this.keys = { ...this.keys, ...(key ? { key } : {}), ...(a.owner ? { owner: a.owner } : {}) };
+  }
+
+  private helloMsg() {
+    return { t: "hello", ...this.me, ...this.keys };
+  }
+
   private receive(msg: ServerMessage) {
     switch (msg.t) {
+      case "access":
+        this.learn(msg.access);
+        this.events.access(msg.access);
+        break;
+      case "locked":
+        delete this.keys.pass;
+        this.setStatus("online");
+        this.events.locked(msg);
+        break;
+      case "pass":
+        this.keys = { ...this.keys, pass: msg.token };
+        this.events.pass(msg.token);
+        break;
+      case "denied":
+        this.closed = true;
+        this.pending.clear();
+        this.ws?.close();
+        this.events.denied(msg.why, msg.at);
+        break;
+      case "done":
+        this.events.done(msg.act, msg.ok, msg.message);
+        break;
       case "init": {
+        this.learn(msg.access);
         const pending = [...this.pending.values()];
         this.events.init(msg, pending.flatMap((p) => p.ops));
         this.setStatus("online");
@@ -146,7 +202,15 @@ export class LiveLink implements Link {
 
   hello(name: string, color: string, cid: string) {
     this.me = { name, color, cid };
-    this.raw({ t: "hello", ...this.me });
+    this.raw(this.helloMsg());
+  }
+
+  unlock(pw: string) {
+    if (!this.raw({ t: "unlock", pw })) this.events.locked({ wrong: false });
+  }
+
+  admin(act: "password" | "links" | "delete", pw?: string | null) {
+    if (!this.raw(act === "password" ? { t: "admin", act, pw } : { t: "admin", act })) this.events.done(act, false, "You’re offline right now. Try again when the board reconnects.");
   }
 
   ops(ops: Op[], fx?: Effect) {
@@ -270,7 +334,8 @@ export class LocalLink implements Link {
     const first = !this.me;
     this.me = { pid: this.pid, name, color };
     if (first) {
-      this.events.init({ you: this.pid, meta: this.state.meta, items: this.state.list(), people: [...this.others.values()] }, []);
+      const access = { role: "owner" as const, password: false, view: "", local: true };
+      this.events.init({ you: this.pid, meta: this.state.meta, items: this.state.list(), people: [...this.others.values()], access }, []);
       this.events.status("online");
     }
     this.post({ t: "hello", person: this.me });
@@ -293,6 +358,20 @@ export class LocalLink implements Link {
     this.post({ t: "react", pid: this.pid, kind, x, y });
   }
 
+  unlock() {}
+
+  /** A board in this browser has no links or password to manage; deleting it clears it from this browser. */
+  admin(act: AdminAct) {
+    if (act !== "delete") return this.events.done(act, false, "Passwords and new links need a deployed Longtable (npm run dev:worker).");
+    try {
+      localStorage.removeItem(this.key);
+    } catch {
+      // ignore
+    }
+    this.events.done(act, true);
+    this.events.denied("deleted", new Date().toISOString());
+  }
+
   close() {
     this.post({ t: "leave", pid: this.pid });
     this.channel?.close();
@@ -310,12 +389,14 @@ export class DemoLink implements Link {
   ) {}
 
   hello() {
-    this.events.init({ you: "demo-you", meta: this.meta, items: [], people: [] }, []);
+    this.events.init({ you: "demo-you", meta: this.meta, items: [], people: [], access: { role: "editor", password: false, view: "", local: true } }, []);
     this.events.status("online");
   }
 
   ops() {}
   presence() {}
   react() {}
+  unlock() {}
+  admin() {}
   close() {}
 }

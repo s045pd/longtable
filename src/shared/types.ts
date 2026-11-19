@@ -109,7 +109,39 @@ export interface Person {
   pid: string;
   name: string;
   color: string;
+  /** True for someone who opened the watch-only link. */
+  view?: boolean;
 }
+
+/**
+ * Who may do what on a board. The owner made it (or holds its owner link) and
+ * manages it; editors came with the edit link; viewers with the watch link.
+ */
+export type Role = "owner" | "editor" | "viewer";
+
+/** What a board tells each person about their access, and the links they may hand on. */
+export interface Access {
+  role: Role;
+  /** True when a link alone is not enough: the board's password is needed too. */
+  password: boolean;
+  /** The key of the link that can change the board (owners and editors only). */
+  edit?: string;
+  /** The key of the watch-only link. */
+  view: string;
+  /**
+   * The owner key, sent once: when a board made before boards had keys is
+   * first opened, whoever opens it becomes its owner.
+   */
+  owner?: string;
+  /** A board kept in this browser (no server): links, passwords and owners do not apply. */
+  local?: boolean;
+}
+
+/** Why a board would not open: no board at that address, a link that is no longer the board's, or the board was deleted. */
+export type DeniedReason = "missing" | "link" | "deleted";
+
+/** The owner's controls. */
+export type AdminAct = "password" | "links" | "delete";
 
 /** Where someone is and what they are doing. All coordinates are world units. */
 export interface Presence {
@@ -128,14 +160,25 @@ export interface Presence {
 export type ReactionKind = "heart" | "star" | "bang" | "clap";
 
 export type ClientMessage =
-  | { t: "hello"; name: string; color: string; cid: string }
+  /** key: the key from the link; owner: the owner key; pass: what the board gave back for its password. */
+  | { t: "hello"; name: string; color: string; cid: string; key?: string; owner?: string; pass?: string }
+  | { t: "unlock"; pw: string }
+  | { t: "admin"; act: "password"; pw: string | null }
+  | { t: "admin"; act: "links" | "delete" }
   | { t: "ops"; tx: number; ops: Op[]; fx?: Effect }
   | { t: "pres"; p: Presence }
   | { t: "react"; kind: ReactionKind; x: number; y: number }
   | { t: "ping" };
 
 export type ServerMessage =
-  | { t: "init"; you: string; meta: Meta; items: Item[]; people: (Person & { p?: Presence })[] }
+  | { t: "init"; you: string; meta: Meta; items: Item[]; people: (Person & { p?: Presence })[]; access: Access }
+  | { t: "access"; access: Access }
+  /** The link is right but the board has a password. wait: seconds before another try is checked. */
+  | { t: "locked"; wrong?: boolean; wait?: number }
+  /** The password was right: keep this and send it as `pass` next time instead of the password. */
+  | { t: "pass"; token: string }
+  | { t: "denied"; why: DeniedReason; at?: string }
+  | { t: "done"; act: AdminAct; ok: boolean; message?: string }
   | { t: "ops"; from: string; ops: Op[]; fx?: Effect }
   | { t: "ack"; tx: number; rejected?: number }
   | { t: "join"; person: Person }

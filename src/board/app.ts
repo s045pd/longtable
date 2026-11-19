@@ -9,14 +9,14 @@ import { randomId } from "../shared/ids";
 import { BoardState } from "../shared/state";
 import { FLIGHT, notesInWeek, planTidy, waveDelay } from "../shared/tidy";
 import type { TemplateName } from "../shared/templates";
-import type { Effect, Item, NoteItem, Op, Person, Presence, ReactionKind } from "../shared/types";
+import type { Access, AdminAct, DeniedReason, Effect, Item, NoteItem, Op, Person, Presence, ReactionKind } from "../shared/types";
 import { Camera, type Insets } from "./camera";
 import { Chrome } from "./chrome";
 import { measureLabel, resetFits } from "./fit";
 import { Grid } from "./grid";
-import { loadIdentity, rememberBoard, saveIdentity, deviceId, type Identity } from "./identity";
+import { boardLink, forgetBoard, loadIdentity, rememberBoard, saveIdentity, saveKeys, deviceId, type Identity } from "./identity";
 import { attachInput } from "./input";
-import { DemoLink, LiveLink, LocalLink, type InitData, type Link, type LinkStatus } from "./net";
+import { DemoLink, LiveLink, LocalLink, type BoardKeys, type InitData, type Link, type LinkStatus } from "./net";
 import { Demo } from "./demo";
 import { nextMonday } from "../shared/days";
 import { People } from "./people";
@@ -50,6 +50,10 @@ export class Board {
   sampleTeam!: SampleTeam;
   /** Set on the demo board (/demo), which plays the whole story by itself. */
   demo: Demo | null = null;
+  /** What you may do here, and the links you may hand on; null until the board opens. */
+  access: Access | null = null;
+  /** The keys this tab opened the board with. */
+  keys: BoardKeys;
   link: Link;
   sel = new Set<string>();
   tool: Tool = "select";
@@ -66,8 +70,9 @@ export class Board {
   private lastView = "";
   private firstInit = true;
 
-  constructor(root: HTMLElement, id: string, opts: { live: boolean; template?: TemplateName; demo?: boolean }) {
+  constructor(root: HTMLElement, id: string, opts: { live: boolean; template?: TemplateName; demo?: boolean; keys?: BoardKeys }) {
     this.id = id;
+    this.keys = opts.keys ?? {};
     this.root = root;
     if (opts.demo) this.demo = new Demo(this);
     const saved = loadIdentity();
@@ -90,11 +95,28 @@ export class Board {
         this.status = s;
         this.chrome.setStatus(s);
       },
+      access: (a: Access) => this.onAccess(a),
+      locked: (info: { wrong?: boolean; wait?: number }) => {
+        // On the board until now: the owner changed the password.
+        const changed = this.ready;
+        if (changed) this.wipe();
+        if (this.keys.pass) {
+          delete this.keys.pass;
+          saveKeys(this.id, { pass: undefined });
+        }
+        this.chrome.showGate("locked", { ...info, changed });
+      },
+      pass: (token: string) => {
+        this.keys.pass = token;
+        saveKeys(this.id, { pass: token });
+      },
+      denied: (why: DeniedReason, at?: string) => this.onDenied(why, at),
+      done: (act: AdminAct, ok: boolean, message?: string) => this.chrome.onDone(act, ok, message),
     };
     this.link = opts.demo
       ? new DemoLink(events, { client: "Pell & Rye", file: "Opening week", weekOf: nextMonday(), template: "demo" })
       : opts.live
-        ? new LiveLink(id, events)
+        ? new LiveLink(id, events, this.keys)
         : new LocalLink(id, events, opts.template ?? "blank");
     // Say hello with whatever name we have; the join card renames us after.
     this.link.hello(this.me.name || "Guest", this.me.color, this.me.cid);
@@ -146,6 +168,8 @@ export class Board {
   // ----------------------------------------------------------------- events
   private onInit(d: InitData, pending: Op[]) {
     this.me.pid = d.you;
+    this.onAccess(d.access);
+    this.chrome.hideGate();
     this.state = new BoardState(d.meta, d.items);
     for (const op of pending) this.state.apply(op);
     setWeekOf(this.state.meta.weekOf);
@@ -172,6 +196,62 @@ export class Board {
       this.fitAll(false);
       if (!loadIdentity()?.name) this.chrome.askName(this.suggestColor());
     }
+  }
+
+  /** Keep the keys that open the board, and show the link you may share in the address bar. */
+  private onAccess(a: Access) {
+    this.access = a;
+    this.root.classList.toggle("view-only", a.role === "viewer");
+    if (a.role === "viewer") {
+      this.editor.commit();
+      this.setSelection([]);
+      if (this.tool !== "select" && this.tool !== "hand") this.setTool("select");
+    }
+    if (!a.local) {
+      const key = a.role === "viewer" ? a.view : a.edit!;
+      // Keep the owner key that worked (from an owner link, or handed over now); drop one that didn't.
+      const owner = a.role === "owner" ? (a.owner ?? this.keys.owner) : undefined;
+      this.keys = { ...this.keys, key, owner };
+      saveKeys(this.id, { key, owner });
+      // Copying the address bar shares the edit link (or the watch link), never the owner key.
+      const url = boardLink(this.id, a.role === "viewer" ? "v" : "k", key);
+      if (location.href !== url) history.replaceState(history.state, "", url);
+    }
+    this.chrome.onAccess();
+  }
+
+  /** The board will not open with this tab's keys, or is gone: forget it here and say why. */
+  private onDenied(why: DeniedReason, at?: string) {
+    this.access = null;
+    this.sampleTeam.stop();
+    forgetBoard(this.id);
+    this.wipe();
+    this.chrome.showGate(why, { at });
+  }
+
+  /** Take the board off this screen: shut out (new links, a new password, deleted), nothing of it stays visible. */
+  private wipe() {
+    this.ready = false;
+    this.editor.commit();
+    this.setSelection([]);
+    this.state = new BoardState({ client: "", file: "", weekOf: "", template: "" }, []);
+    for (const v of this.views.values()) v.remove();
+    this.views.clear();
+    for (const p of [...this.people.all.keys()]) this.people.remove(p);
+    this.chrome.onMeta();
+    this.chrome.onPeople();
+    this.chrome.onItems();
+  }
+
+  /** Every item off the board, for everyone, as one step undo takes back. */
+  clearBoard() {
+    this.editor.commit();
+    this.setSelection([]);
+    this.commit([...this.state.items.keys()].map((id) => ({ op: "del", id }) as Op));
+  }
+
+  get readOnly() {
+    return this.access?.role === "viewer" || !this.ready;
   }
 
   private onRemoteOps(_from: string, ops: Op[], fx?: Effect) {
@@ -244,6 +324,11 @@ export class Board {
    * them all. Returns the ops that undo them.
    */
   commit(ops: Op[], opts: { history?: boolean; fx?: Effect; motion?: (id: string) => Motion; send?: boolean } = {}): Op[] {
+    // The watch link changes nothing (the room would refuse it anyway).
+    if (this.readOnly && !this.demo) {
+      if (this.ready) this.chrome.viewOnly();
+      return [];
+    }
     const inverse: Op[] = [];
     const applied: Op[] = [];
     for (const op of ops) {
@@ -487,6 +572,7 @@ export class Board {
 
   /** Tidy the selection, or the whole board when nothing is selected. */
   tidy() {
+    if (this.readOnly && !this.demo) return this.chrome.viewOnly();
     this.editor.commit();
     // A selection without notes would tidy nothing: then tidy the board.
     const targets = this.selected().some((it) => it.type === "note") ? [...this.sel] : null;
@@ -542,6 +628,7 @@ export class Board {
   }
 
   setTool(tool: Tool) {
+    if (this.readOnly && !this.demo && tool !== "select" && tool !== "hand") return this.chrome.viewOnly();
     if (tool !== "select") this.editor.commit();
     this.tool = tool;
     this.root.dataset.tool = tool;

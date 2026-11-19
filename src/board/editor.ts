@@ -26,6 +26,7 @@ export class Editor {
 
   open(id: string, opts: { fresh?: boolean; row?: number; caret?: "end" | "all" } = {}) {
     if (this.id === id) return;
+    if (this.board.readOnly && !this.board.demo) return this.board.chrome.viewOnly();
     this.commit();
     const it = this.board.state.items.get(id);
     const view = this.board.views.get(id);

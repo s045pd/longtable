@@ -17,6 +17,13 @@ five fictional people.
 - **Plan live with anyone who has the link.** No accounts: a board is a link.
   Cursors carry a name flag and leave a short streak when they move fast;
   people see what you select and the words you type, as you type them.
+- **Private by default.** A board's address alone opens nothing: its links
+  carry a secret key after the `#` (which never reaches a server). Share an
+  edit link, or a watch link that can look, point and react but never
+  change anything. Whoever starts a board owns it and can add a password,
+  change it, make new links (the old ones stop working at once), clear the
+  board or delete it from the server for good. Wrong passwords are slowed
+  down; the password is kept only as a salted hash.
 - **Notes, headings, checklists, pen.** Double-click the canvas for a note
   (`N`), `T` for a heading, `C` for a checklist, `P` to draw. Drag to move,
   drag the empty canvas to select several, `Alt`-drag to copy, paste a list of
@@ -74,24 +81,34 @@ in this browser (and shared between its tabs) instead of on a server.
 ```sh
 npm test             # unit tests: day and time reading, the tidy, checks, exports
 npm run typecheck
-npm run build && npm run e2e   # two browsers and a phone against a local Worker
+npm run build && npm run e2e   # several browsers and a phone against a local Worker
 ```
 
 The end-to-end run uses Playwright's Chromium (`npx playwright install chromium`
-once if you do not have it). Point it at a deployed board with
-`BASE_URL=https://… npm run e2e`.
+once if you do not have it). It covers the privacy rules too: keyless and
+made-up links, the watch link (also against a script talking to the server
+directly), passwords and the wait after wrong ones, new links, clear, delete,
+the team password and the security headers. Point it at a deployed
+Longtable with `BASE_URL=https://… npm run e2e` (add `TEAM_PASSWORD=…` if it
+has one).
 
-## Deploy
+## Deploy your own
 
-Longtable runs on Cloudflare: a Worker serves the app and the API, and each
-board is a [Durable Object](https://developers.cloudflare.com/durable-objects/)
-with its own SQLite storage and hibernating WebSockets (works on the Workers
-free plan).
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/s045pd/longtable)
+
+Longtable runs on Cloudflare's free plan: a Worker serves the app and the
+API, and each board is a
+[Durable Object](https://developers.cloudflare.com/durable-objects/) with its
+own SQLite storage and hibernating WebSockets. With one Cloudflare API token:
 
 ```sh
-npx wrangler login
-npm run deploy
+npm run setup      # asks for the token, then installs, builds, deploys and prints your address
 ```
+
+[DEPLOY.md](DEPLOY.md) has the token link (the two permissions it needs,
+filled in), the GitHub Actions way, the team password, your own domain,
+what the free plan covers, and where the data lives. (The button works once
+the repository is public.)
 
 ## How it is built
 
@@ -107,13 +124,16 @@ src/board/    the board in the browser: app.ts (state, actions, undo),
               local link for development), camera.ts and grid.ts, and
               demo.ts (the front page's demo, played with all of the above)
 src/landing.ts  the written introduction (/about)
-worker/       index.ts (API and static files) and room.ts (one board's room)
+worker/       index.ts (API and static files), room.ts (one board's room) and
+              access.ts (its keys, password and the wait after wrong tries)
+scripts/      deploy-cloudflare.mjs (npm run setup)
 ```
 
 Every change is an op (`put`, `patch`, `del`, `vote`, `meta`). A browser
 applies its own ops at once, keeps their inverse for undo, and sends them; the
-room checks each op against the schema, applies it in arrival order, stores
-it, and passes it to everyone else. Text, positions and colours are
+room checks each op against the schema, applies it in arrival order, passes
+it to everyone else, and writes what changed to storage at most once a second
+(so a drag is one write, not hundreds). Text, positions and colours are
 last-writer-wins per field; votes are per person, so two votes never collide.
 Presence (cursor, selection, what you are typing into, your view) is relayed
 but never stored.

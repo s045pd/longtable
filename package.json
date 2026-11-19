@@ -6,6 +6,7 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
+    "setup": "node scripts/deploy-cloudflare.mjs",
     "dev": "vite",
     "dev:worker": "npm run build && wrangler dev",
     "build": "tsc --noEmit -p tsconfig.json && vite build",
@@ -30,5 +31,15 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "cloudflare": {
+    "bindings": {
+      "BOARDS": {
+        "description": "Each board is one Durable Object with its own SQLite storage (free plan)."
+      },
+      "CREATE_PASSWORD": {
+        "description": "Optional secret. Set it (Settings → Variables and Secrets) and only people who know it can start new boards; people you send a board link to never need it."
+      }
+    }
   }
 }

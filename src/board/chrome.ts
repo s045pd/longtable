@@ -5,9 +5,9 @@ import { PALETTE } from "../shared/colors";
 import { ANY, DAY_HEADERS, DAY_NAMES, FROM_WORDS, NO_TIME, dateOf, dayPicked, findDay, formatTime, mondayOf, nextMonday, noteDay, noteTime, timePicked } from "../shared/days";
 import { fileStem, toCsv, toIcs, toMarkdown } from "../shared/exporter";
 import { REACTIONS } from "../shared/schema";
-import type { NoteItem, ReactionKind } from "../shared/types";
+import type { AdminAct, DeniedReason, NoteItem, ReactionKind } from "../shared/types";
 import { escapeHtml, type Board, type Tool } from "./app";
-import { recentBoards } from "./identity";
+import { boardLink, forgetBoard, recentBoards } from "./identity";
 import type { LinkStatus } from "./net";
 import { reactionIcon } from "./people";
 
@@ -32,6 +32,13 @@ const ICON = {
   plus: '<path d="M12 5v14M5 12h14" fill="none"/>',
   day: '<rect x="4" y="5" width="16" height="15" rx="2" fill="none"/><path d="M4 10h16M9 3v4M15 3v4" fill="none"/><rect x="13" y="13" width="4" height="4" rx="0.5"/>',
   minus: '<path d="M5 12h14" fill="none"/>',
+  lock: '<rect x="5" y="10.5" width="14" height="10" rx="2" fill="none"/><path d="M8.5 10.5V7.5a3.5 3.5 0 017 0v3" fill="none"/>',
+  unlock: '<rect x="5" y="10.5" width="14" height="10" rx="2" fill="none"/><path d="M8.5 10.5V7.5a3.5 3.5 0 016.8-1.2" fill="none"/>',
+  link: '<path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1" fill="none"/><path d="M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1" fill="none"/>',
+  key: '<circle cx="8" cy="15" r="4" fill="none"/><path d="M11 12l8-8M16 7l2 2M14 9l2 2" fill="none"/>',
+  gear: '<circle cx="12" cy="12" r="3" fill="none"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" fill="none"/>',
+  eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" fill="none"/><circle cx="12" cy="12" r="3" fill="none"/>',
+  device: '<rect x="6" y="3" width="12" height="18" rx="2.5" fill="none"/><path d="M10.5 18h3" fill="none"/>',
 };
 const icon = (name: keyof typeof ICON) => `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">${ICON[name]}</svg>`;
 
@@ -70,6 +77,13 @@ export class Chrome {
   private boardsMenu: HTMLElement;
   private sortedTimers: number[] = [];
   private avatarsShown = new Set<string>();
+  private gate: HTMLElement;
+  /** Waiting for the room's answer to one of the owner's controls. */
+  private waiting = new Map<AdminAct, (r: { ok: boolean; message?: string }) => void>();
+  private viewOnlyAt = 0;
+  /** The share or settings dialog while open, to redraw when access changes. */
+  private panel: { redraw: () => void; close: () => void } | null = null;
+  private gateTimer = 0;
 
   constructor(private board: Board) {
     const root = board.root;
@@ -119,6 +133,7 @@ export class Chrome {
       <div class="sorted" aria-live="polite"></div>
       <div class="demo-shield" aria-hidden="true"></div>
       <div class="corner"><span class="corner-tag"></span><button class="sample-btn" hidden></button><span class="demo-controls"></span></div>
+      <div class="gate" hidden></div>
     `,
     );
     const $ = <T extends HTMLElement>(s: string) => root.querySelector(s) as T;
@@ -136,11 +151,13 @@ export class Chrome {
     this.zoomMenu = $(".zoom-menu");
     this.whenMenu = $(".when-menu");
     this.boardsMenu = $(".boards-menu");
+    this.gate = $(".gate");
 
     // Names in the top bar are edited in place.
     for (const key of ["client", "file"] as const) {
       const span = this.top.querySelector<HTMLElement>(`.${key}`)!;
       span.addEventListener("click", () => {
+        if (board.readOnly && !board.demo) return this.viewOnly();
         span.contentEditable = "plaintext-only";
         if (span.contentEditable !== "plaintext-only") span.contentEditable = "true";
         span.focus();
@@ -375,11 +392,13 @@ export class Chrome {
     document.title = m.template === "demo" ? "Longtable · plan it together" : `${[m.client, m.file].filter(Boolean).join(" / ") || "Board"} · Longtable`;
     const tag = this.board.root.querySelector<HTMLElement>(".corner-tag")!;
     tag.textContent =
-      m.template === "pell-and-rye"
-        ? "EXAMPLE BOARD · PELL & RYE IS A FICTIONAL BAKERY"
-        : m.template === "demo"
-          ? "DEMO · NOTHING HERE IS SAVED · PELL & RYE IS A FICTIONAL BAKERY"
-          : "";
+      this.board.access?.role === "viewer"
+        ? "WATCHING · THIS LINK CAN’T CHANGE THE BOARD"
+        : m.template === "pell-and-rye"
+          ? "EXAMPLE BOARD · PELL & RYE IS A FICTIONAL BAKERY"
+          : m.template === "demo"
+            ? "DEMO · NOTHING HERE IS SAVED · PELL & RYE IS A FICTIONAL BAKERY"
+            : "";
     tag.hidden = !tag.textContent;
     this.onSampleTeam();
   }
@@ -394,10 +413,12 @@ export class Chrome {
     const extra = others.length - shown.length;
     const seen = this.avatarsShown;
     this.avatarsShown = new Set(["me", ...others.map((p) => p.pid)]);
-    const av = (pid: string, name: string, color: string, me = false) =>
-      `<button class="avatar${me ? " me" : ""}${seen.has(me ? "me" : pid) ? "" : " new"}${b.following === pid ? " followed" : ""}" data-pid="${me ? "me" : pid}" style="--c:${color}" title="${me ? `You (${escapeHtml(name || "Guest")}) · change name or colour` : `${escapeHtml(name)} · click to follow`}" aria-label="${me ? "You" : `Follow ${escapeHtml(name)}`}">${escapeHtml((name || "?").trim().charAt(0).toUpperCase() || "?")}</button>`;
+    const av = (pid: string, name: string, color: string, me = false, watching = false) =>
+      `<button class="avatar${me ? " me" : ""}${watching ? " watching" : ""}${seen.has(me ? "me" : pid) ? "" : " new"}${b.following === pid ? " followed" : ""}" data-pid="${me ? "me" : pid}" style="--c:${color}" title="${me ? `You (${escapeHtml(name || "Guest")}) · change name or colour` : `${escapeHtml(name)}${watching ? " · watching" : ""} · click to follow`}" aria-label="${me ? "You" : `Follow ${escapeHtml(name)}`}">${escapeHtml((name || "?").trim().charAt(0).toUpperCase() || "?")}</button>`;
     this.top.querySelector(".avatars")!.innerHTML =
-      shown.map((p) => av(p.pid, p.name, p.color)).join("") + (extra > 0 ? `<span class="avatar more">+${extra}</span>` : "") + av("me", b.me.name, b.me.color, true);
+      shown.map((p) => av(p.pid, p.name, p.color, false, !!p.view)).join("") +
+      (extra > 0 ? `<span class="avatar more">+${extra}</span>` : "") +
+      av("me", b.me.name, b.me.color, true, b.access?.role === "viewer");
   }
 
   onItems() {
@@ -609,10 +630,11 @@ export class Chrome {
       removeEventListener("keydown", onKey, true);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        close();
-      }
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      // Only the dialog on top closes.
+      const open = [...this.board.root.querySelectorAll(".dialog.open")];
+      if (open[open.length - 1] === wrap || !wrap.classList.contains("open")) close();
     };
     addEventListener("keydown", onKey, true);
     wrap.querySelector(".scrim")!.addEventListener("click", close);
@@ -659,31 +681,448 @@ export class Chrome {
   }
 
   share() {
+    const b = this.board;
+    const a = b.access;
+    this.panel?.close();
+    if (!a || a.local) return this.shareLocal();
+    const d = this.dialog("", "share-dialog");
+    const card = d.el.querySelector(".card")!;
+    const row = (label: string, url: string, what: string, note: string) => `
+      <div class="share-link">
+        <div class="share-label"><b>${label}</b><span>${note}</span></div>
+        <div class="linkrow"><input readonly value="${escapeHtml(url)}" aria-label="${label} link"/><button class="btn ${what === "edit" ? "primary" : ""} copy" data-url="${escapeHtml(url)}">Copy</button></div>
+      </div>`;
+    const redraw = () => {
+      const a = b.access;
+      if (!a) return d.close();
+      const edit = a.edit ? boardLink(b.id, "k", a.edit) : null;
+      const view = boardLink(b.id, "v", a.view);
+      card.innerHTML = `
+        <h2>Share this board</h2>
+        <p class="muted">Only people with a link get in: boards aren’t listed or searchable anywhere, and the key in the link never reaches the server’s logs.</p>
+        ${edit ? row("Can edit", edit, "edit", "Anyone with this link can change the board.") : ""}
+        ${row("Can watch", view, "view", "Sees it all live and can react, but can’t change anything.")}
+        <div class="share-status ${a.password ? "on" : ""}">${icon(a.password ? "lock" : "unlock")}<span>${
+          a.password ? "<b>Password on.</b> Send it separately from the link." : "<b>No password:</b> the link is enough to get in."
+        }</span>${a.role === "owner" ? `<button class="linkish" data-act="pw">${a.password ? "Change" : "Add one"}</button>` : ""}</div>
+        ${
+          b.state.meta.template === "pell-and-rye" && a.role !== "viewer"
+            ? `<p class="tip"><b>Trying it on your own?</b> Open the link in a second window and watch your other self’s cursor arrive, or add sample teammates: four made-up people who wander the board on your screen only.</p>`
+            : ""
+        }
+        <div class="actions wrap">
+          <button class="btn ghost" data-act="settings">${icon("gear")}<span>Board settings</span></button>
+          ${b.state.meta.template === "pell-and-rye" && a.role !== "viewer" ? `<button class="btn ghost sample">${b.sampleTeam.active ? "Stop sample teammates" : "Add sample teammates"}</button>` : ""}
+          <button class="btn primary" data-close>Done</button>
+        </div>`;
+      card.querySelectorAll<HTMLInputElement>("input[readonly]").forEach((input) => input.addEventListener("focus", () => input.select()));
+      card.querySelector("[data-close]")!.addEventListener("click", d.close);
+    };
+    card.addEventListener("click", async (e) => {
+      const t = (e.target as HTMLElement).closest<HTMLButtonElement>("button");
+      if (!t) return;
+      if (t.classList.contains("copy")) await this.copy(t.dataset.url!, "Link copied");
+      else if (t.classList.contains("sample")) {
+        if (b.sampleTeam.active) b.sampleTeam.stop();
+        else b.sampleTeam.start();
+        d.close();
+      } else if (t.dataset.act === "settings") {
+        d.close();
+        this.settings();
+      } else if (t.dataset.act === "pw") this.passwordDialog();
+    });
+    redraw();
+    this.track(d, redraw);
+  }
+
+  /** The share dialog of a board kept in this browser (development, or the demo). */
+  private shareLocal() {
     const url = location.href.split("#")[0].split("?")[0];
+    const demo = !!this.board.demo;
     const d = this.dialog(`
       <h2>Plan it together</h2>
-      <p class="muted">Anyone with this link can see the board and change it, live.</p>
+      <p class="muted">${demo ? "This is the demo: it lives in this tab only. Make a board of your own to share it." : "This board is kept in this browser only (no server is running), so its link opens it in this browser’s other tabs."}</p>
       <div class="linkrow"><input readonly value="${escapeHtml(url)}" aria-label="Board link"/><button class="btn primary copy">Copy link</button></div>
-      <p class="tip"><b>Trying it on your own?</b> Open the link in a second window, or on your phone, and watch your other self’s cursor arrive. Or add sample teammates: four made-up people who wander the board on your screen only.</p>
-      <div class="actions"><button class="btn ghost sample">${this.board.sampleTeam.active ? "Stop sample teammates" : "Add sample teammates"}</button><button class="btn ghost" data-close>Done</button></div>
+      <div class="actions">${demo ? '<a class="btn ghost" href="/new?template=pell-and-rye">Make your own board</a>' : '<button class="btn ghost" data-act="settings">Board settings</button>'}<button class="btn ghost" data-close>Done</button></div>
     `);
-    d.el.querySelector(".sample")!.addEventListener("click", () => {
-      if (this.board.sampleTeam.active) this.board.sampleTeam.stop();
-      else this.board.sampleTeam.start();
+    d.el.querySelector(".copy")!.addEventListener("click", () => this.copy(url, "Link copied"));
+    d.el.querySelector("[data-act='settings']")?.addEventListener("click", () => {
       d.close();
+      this.settings();
     });
-    const input = d.el.querySelector("input")!;
-    input.addEventListener("focus", () => input.select());
-    d.el.querySelector(".copy")!.addEventListener("click", async () => {
-      try {
-        await navigator.clipboard.writeText(url);
-        this.toast("Link copied");
-      } catch {
-        input.select();
-        document.execCommand?.("copy");
-        this.toast("Link copied");
+  }
+
+  private async copy(text: string, done: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const t = document.createElement("textarea");
+      t.value = text;
+      t.style.cssText = "position:fixed;opacity:0";
+      document.body.append(t);
+      t.select();
+      document.execCommand?.("copy");
+      t.remove();
+    }
+    this.toast(done);
+  }
+
+  private track(d: { el: HTMLElement; close: () => void }, redraw: () => void) {
+    const panel = {
+      redraw,
+      close: d.close,
+    };
+    this.panel = panel;
+    const close = d.close;
+    d.close = () => {
+      if (this.panel === panel) this.panel = null;
+      close();
+    };
+    panel.close = d.close;
+    d.el.querySelector(".scrim")!.addEventListener("click", () => this.panel === panel && (this.panel = null));
+  }
+
+  /** Board settings: the owner's password, links, owner link, clear and delete; for everyone, forgetting it here. */
+  settings() {
+    const b = this.board;
+    this.panel?.close();
+    const d = this.dialog("", "settings-dialog");
+    const card = d.el.querySelector(".card")!;
+    const redraw = () => {
+      const a = b.access;
+      if (!a) return d.close();
+      const owner = a.role === "owner";
+      const lede = a.local
+        ? "This board is kept in this browser only. Passwords, links and owners come with a deployed Longtable."
+        : owner
+          ? "You own this board: only you can change the password and links, or delete it."
+          : a.role === "editor"
+            ? "You can change this board. Its owner (whoever made it) looks after its password and links."
+            : "You’re watching this board: you see every change live, but this link can’t change anything.";
+      card.innerHTML = `
+        <h2>Board settings</h2>
+        <p class="muted">${lede}</p>
+        ${
+          owner && !a.local
+            ? `
+        <section class="set">
+          <h3>${icon("lock")}Password</h3>
+          <p>${a.password ? "On. Anyone with a link also needs the password, once per device. You don’t, as the owner." : "Off. Anyone with a link can open the board."}</p>
+          <div class="row">${a.password ? '<button class="btn" data-act="pw">Change the password</button><button class="btn ghost" data-act="pw-off">Turn it off</button>' : '<button class="btn" data-act="pw">Set a password</button>'}</div>
+        </section>
+        <section class="set">
+          <h3>${icon("link")}Links</h3>
+          <p>If a link reached someone it shouldn’t, make new ones. The old links stop working at once, and everyone but you leaves the board until they get a new one.</p>
+          <div class="row"><button class="btn" data-act="links">Make new links</button></div>
+        </section>
+        <section class="set">
+          <h3>${icon("key")}Your owner link</h3>
+          <p>Opens the board as its owner, to manage it from another device. Keep it to yourself: whoever has it can change the password or delete the board.</p>
+          <div class="row"><button class="btn" data-act="owner-link">Copy the owner link</button></div>
+        </section>`
+            : ""
+        }
+        ${
+          owner
+            ? `
+        <section class="set danger">
+          <h3>${icon("trash")}Clear or delete</h3>
+          <p>Clearing takes everything off the board, for everyone; Undo brings it back. Deleting removes the board and everything on it from the ${a.local ? "browser" : "server"} for good${a.local ? "" : ", and its links stop working"}.</p>
+          <div class="row"><button class="btn" data-act="clear">Clear the board</button><button class="btn danger" data-act="delete">Delete the board…</button></div>
+        </section>`
+            : ""
+        }
+        ${
+          a.local
+            ? ""
+            : `
+        <section class="set">
+          <h3>${icon("device")}This device</h3>
+          <p>This browser keeps the board’s key${a.password && !owner ? " and your way past the password" : ""}, so it opens again from Your boards. Forget it to take the board off this device${owner ? ", including your owner key" : ""}; you’ll need a link to come back.</p>
+          <div class="row"><button class="btn ghost" data-act="forget">Forget this board here</button></div>
+        </section>`
+        }
+        <div class="actions"><button class="btn primary" data-close>Done</button></div>`;
+      card.querySelector("[data-close]")!.addEventListener("click", d.close);
+    };
+    card.addEventListener("click", async (e) => {
+      const act = (e.target as HTMLElement).closest<HTMLButtonElement>("button")?.dataset.act;
+      if (act === "pw") this.passwordDialog();
+      else if (act === "pw-off") {
+        const r = await this.ask("password", () => b.link.admin("password", null));
+        this.toast(r.ok ? "Password off: a link alone opens the board now." : (r.message ?? "That didn’t work."));
+      } else if (act === "links") this.newLinksDialog();
+      else if (act === "owner-link" && b.keys.owner) await this.copy(boardLink(b.id, "o", b.keys.owner), "Owner link copied: keep it to yourself");
+      else if (act === "clear") this.clearDialog();
+      else if (act === "delete") this.deleteDialog();
+      else if (act === "forget") this.forgetDialog();
+    });
+    redraw();
+    this.track(d, redraw);
+  }
+
+  /** Ask the room to do one of the owner's controls; resolves with its answer. */
+  private ask(act: AdminAct, run: () => void): Promise<{ ok: boolean; message?: string }> {
+    return new Promise((resolve) => {
+      this.waiting.get(act)?.({ ok: false });
+      this.waiting.set(act, resolve);
+      run();
+    });
+  }
+
+  onDone(act: AdminAct, ok: boolean, message?: string) {
+    const w = this.waiting.get(act);
+    this.waiting.delete(act);
+    if (w) w({ ok, message });
+    else if (!ok && message) this.toast(message);
+  }
+
+  private passwordDialog() {
+    const b = this.board;
+    const had = !!b.access?.password;
+    const d = this.dialog(
+      `
+      <h2>${had ? "Change the password" : "Set a password"}</h2>
+      <p class="muted">${had ? "Everyone but you will be asked for the new one, including whoever is on the board now." : "People who open a link will be asked for it, once per device. Whoever is on the board now, except you, is asked straight away."} Send it separately from the link.</p>
+      <form class="pw-form">
+        <label class="field"><span>${had ? "New password" : "Password"}</span><input type="password" name="pw" minlength="6" maxlength="200" autocomplete="new-password" required placeholder="At least 6 characters" /></label>
+        <label class="show"><input type="checkbox" name="show" /> Show it</label>
+        <p class="form-error" aria-live="polite"></p>
+        <div class="actions"><button type="button" class="btn ghost" data-close>Cancel</button><button class="btn primary" type="submit">${had ? "Change it" : "Set the password"}</button></div>
+      </form>`,
+      "pw-dialog",
+    );
+    const form = d.el.querySelector("form")!;
+    const input = form.querySelector<HTMLInputElement>("input[name=pw]")!;
+    const err = form.querySelector(".form-error")!;
+    const submit = form.querySelector<HTMLButtonElement>("button[type=submit]")!;
+    form.querySelector<HTMLInputElement>("input[name=show]")!.addEventListener("change", (e) => (input.type = (e.target as HTMLInputElement).checked ? "text" : "password"));
+    input.addEventListener("keydown", (e) => e.stopPropagation());
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const pw = input.value;
+      if (pw.length < 6) {
+        err.textContent = "Make it at least 6 characters.";
+        return input.focus();
+      }
+      submit.disabled = true;
+      submit.textContent = "Saving…";
+      const r = await this.ask("password", () => b.link.admin("password", pw));
+      if (r.ok) {
+        d.close();
+        this.toast(had ? "Password changed: everyone else needs the new one." : "Password on: everyone else needs it to get in.");
+      } else {
+        err.textContent = r.message ?? "That didn’t work. Try again.";
+        submit.disabled = false;
+        submit.textContent = had ? "Change it" : "Set the password";
       }
     });
+    setTimeout(() => input.focus(), 60);
+  }
+
+  private confirm(opts: { title: string; body: string; yes: string; danger?: boolean; typed?: string }): Promise<boolean> {
+    return new Promise((resolve) => {
+      let answered = false;
+      const d = this.dialog(
+        `
+        <h2>${opts.title}</h2>
+        <p class="muted">${opts.body}</p>
+        ${opts.typed ? `<label class="field"><span>Type <b>${opts.typed}</b> to confirm</span><input name="typed" autocomplete="off" spellcheck="false" /></label>` : ""}
+        <div class="actions"><button class="btn ghost" data-close>Cancel</button><button class="btn ${opts.danger ? "danger" : "primary"} yes"${opts.typed ? " disabled" : ""}>${opts.yes}</button></div>`,
+        "confirm-dialog",
+      );
+      const yes = d.el.querySelector<HTMLButtonElement>(".yes")!;
+      const typed = d.el.querySelector<HTMLInputElement>("input[name=typed]");
+      typed?.addEventListener("keydown", (e) => {
+        e.stopPropagation();
+        if (e.key === "Enter" && !yes.disabled) yes.click();
+      });
+      typed?.addEventListener("input", () => (yes.disabled = typed.value.trim().toLowerCase() !== opts.typed));
+      const close = d.close;
+      d.close = () => {
+        close();
+        if (!answered) resolve(false);
+        answered = true;
+      };
+      d.el.querySelectorAll("[data-close], .scrim").forEach((x) => x.addEventListener("click", () => !answered && ((answered = true), resolve(false))));
+      yes.addEventListener("click", () => {
+        answered = true;
+        resolve(true);
+        close();
+      });
+      setTimeout(() => (typed ?? yes).focus(), 60);
+    });
+  }
+
+  private async newLinksDialog() {
+    const ok = await this.confirm({
+      title: "Make new links?",
+      body: "The edit and watch links both change. The old ones stop working right away, and everyone on the board but you leaves it. Then send the new link to the people who should have it.",
+      yes: "Make new links",
+    });
+    if (!ok) return;
+    const r = await this.ask("links", () => this.board.link.admin("links"));
+    if (!r.ok) return this.toast(r.message ?? "That didn’t work.");
+    this.toast("New links made: the old ones no longer open the board.");
+    this.share();
+  }
+
+  private async clearDialog() {
+    const ok = await this.confirm({
+      title: "Clear the board?",
+      body: "Every note, heading, checklist, photo and drawing comes off the board, for everyone on it. Undo (⌘Z) brings it all back.",
+      yes: "Clear the board",
+      danger: true,
+    });
+    if (!ok) return;
+    this.panel?.close();
+    this.board.clearBoard();
+    this.toast("Board cleared. Undo brings it back.");
+  }
+
+  private async deleteDialog() {
+    const m = this.board.state.meta;
+    const name = escapeHtml([m.client, m.file].filter(Boolean).join(" / ") || "This board");
+    const local = !!this.board.access?.local;
+    const ok = await this.confirm({
+      title: "Delete this board for good?",
+      body: local
+        ? `“${name}” and everything on it are removed from this browser. This can’t be undone.`
+        : `“${name}” and everything on it are removed from the server. Its links stop working for everyone, right away, and anyone on it now sees that it’s gone. This can’t be undone.`,
+      yes: "Delete for good",
+      danger: true,
+      typed: "delete",
+    });
+    if (!ok) return;
+    const r = await this.ask("delete", () => this.board.link.admin("delete"));
+    if (!r.ok) this.toast(r.message ?? "That didn’t work.");
+  }
+
+  private async forgetDialog() {
+    const owner = this.board.access?.role === "owner";
+    const ok = await this.confirm({
+      title: "Forget this board on this device?",
+      body: owner
+        ? "This browser forgets the board and your owner key. The board stays as it is for everyone else, but to manage it again you’ll need your owner link: copy it first if you don’t have it."
+        : "This browser forgets the board’s key. The board stays as it is for everyone else; to come back you’ll need the link again.",
+      yes: "Forget it here",
+    });
+    if (!ok) return;
+    forgetBoard(this.board.id);
+    location.href = "/";
+  }
+
+  /** Redraw the share or settings dialog after the access changed. */
+  onAccess() {
+    this.panel?.redraw();
+    this.onMeta();
+    this.onPeople();
+  }
+
+  /** Said, now and then, when the watch link tries to change something. */
+  viewOnly() {
+    const now = Date.now();
+    if (now - this.viewOnlyAt < 4000) return;
+    this.viewOnlyAt = now;
+    this.toast("You’re on the watch link: you can look, point and react, but not change the board.");
+  }
+
+  // ------------------------------------------------------------------ gate
+  /** The screen in front of the board: its password, or why it won’t open. */
+  showGate(kind: "locked" | DeniedReason, info: { wrong?: boolean; wait?: number; at?: string; changed?: boolean } = {}) {
+    const g = this.gate;
+    const b = this.board;
+    this.closeMenus();
+    this.panel?.close();
+    b.root.querySelectorAll(".dialog").forEach((x) => x.remove());
+    b.root.classList.add("gated");
+    g.hidden = false;
+    clearInterval(this.gateTimer);
+    if (kind !== "locked") {
+      const when = info.at ? new Date(info.at) : null;
+      const on = when && !Number.isNaN(+when) ? ` on ${when.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", year: "numeric" })}` : "";
+      const [title, body] = {
+        missing: ["There’s no board at this link", "Check the whole link was copied, or ask whoever sent it for a fresh one."],
+        link: ["This link doesn’t open the board any more", "Its owner made new links, or this one was copied wrong. Ask them for the current link."],
+        deleted: ["This board was deleted", `Its owner deleted it${on}, with everything on it. Nothing of it is kept.`],
+      }[kind];
+      g.dataset.kind = kind;
+      g.innerHTML = `
+        <div class="gate-card" role="alert">
+          <div class="gate-icon">${icon(kind === "deleted" ? "trash" : "link")}</div>
+          <h1>${title}</h1>
+          <p>${body}</p>
+          <div class="actions"><a class="btn primary" href="/new?template=blank">Start a new board</a><a class="btn ghost" href="/">Watch the demo</a></div>
+        </div>`;
+      return;
+    }
+    let form = g.querySelector<HTMLFormElement>("form.unlock");
+    if (g.dataset.kind !== "locked" || !form) {
+      g.dataset.kind = "locked";
+      g.innerHTML = `
+        <div class="gate-card">
+          <div class="gate-icon">${icon("lock")}</div>
+          <h1>This board has a password</h1>
+          <p class="gate-why">${info.changed ? "The board’s owner just changed it. Enter the new one to carry on." : "Whoever sent you the link can tell you what it is."}</p>
+          <form class="unlock">
+            <label class="field"><span>Password</span><input type="password" name="pw" autocomplete="current-password" maxlength="200" required /></label>
+            <p class="form-error" aria-live="polite"></p>
+            <button class="btn primary big" type="submit">Open the board</button>
+          </form>
+          <p class="fine">This device remembers it until the password changes.</p>
+        </div>`;
+      form = g.querySelector<HTMLFormElement>("form.unlock")!;
+      const input = form.querySelector<HTMLInputElement>("input")!;
+      input.addEventListener("keydown", (e) => e.stopPropagation());
+      form.addEventListener("submit", (e) => {
+        e.preventDefault();
+        if (!input.value) return input.focus();
+        const btn = form!.querySelector<HTMLButtonElement>("button")!;
+        btn.disabled = true;
+        btn.textContent = "Checking…";
+        b.link.unlock(input.value);
+      });
+      setTimeout(() => input.focus(), 60);
+    }
+    const input = form.querySelector<HTMLInputElement>("input")!;
+    const btn = form.querySelector<HTMLButtonElement>("button")!;
+    const err = form.querySelector(".form-error")!;
+    if (info.wrong) {
+      input.select();
+      g.querySelector(".gate-card")?.classList.remove("shake");
+      void (g.querySelector(".gate-card") as HTMLElement | null)?.offsetWidth;
+      g.querySelector(".gate-card")?.classList.add("shake");
+    }
+    let wait = info.wait ?? 0;
+    const paint = () => {
+      if (wait > 0) {
+        err.textContent = `${info.wrong ? "That’s not it. " : ""}Too many tries: wait ${wait < 60 ? `${wait} s` : `${Math.ceil(wait / 60)} min`} before the next one.`;
+        btn.disabled = true;
+        btn.textContent = "Wait…";
+      } else {
+        err.textContent = info.wrong ? "That’s not it. Try again." : "";
+        btn.disabled = false;
+        btn.textContent = "Open the board";
+      }
+    };
+    paint();
+    if (wait > 0)
+      this.gateTimer = window.setInterval(() => {
+        wait--;
+        if (wait <= 0) {
+          clearInterval(this.gateTimer);
+          info = { ...info, wrong: false };
+        }
+        paint();
+      }, 1000);
+  }
+
+  hideGate() {
+    clearInterval(this.gateTimer);
+    this.gate.hidden = true;
+    this.gate.innerHTML = "";
+    delete this.gate.dataset.kind;
+    this.board.root.classList.remove("gated");
   }
 
   exportWeek() {

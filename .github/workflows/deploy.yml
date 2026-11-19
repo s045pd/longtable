@@ -1,0 +1,45 @@
+# Deploy Longtable to your own Cloudflare account from GitHub, no computer needed.
+#
+# 1. In your copy of this repository: Settings → Secrets and variables →
+#    Actions → New repository secret, name CLOUDFLARE_API_TOKEN, value your
+#    token (DEPLOY.md has a link that makes one with the right permissions).
+#    Optional secrets: CLOUDFLARE_ACCOUNT_ID (when the token sees several
+#    accounts) and LONGTABLE_TEAM_PASSWORD (only people who know it can start
+#    boards).
+# 2. Actions → Deploy to Cloudflare → Run workflow.
+#
+# To deploy on every push to main as well, add the repository variable
+# AUTO_DEPLOY with the value true.
+name: Deploy to Cloudflare
+
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: Worker name (part of the address)
+        default: longtable
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency: deploy-cloudflare
+
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' || vars.AUTO_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          LONGTABLE_TEAM_PASSWORD: ${{ secrets.LONGTABLE_TEAM_PASSWORD }}
+          WORKER_NAME: ${{ inputs.name || vars.WORKER_NAME || 'longtable' }}
+        run: node scripts/deploy-cloudflare.mjs --yes --name "$WORKER_NAME"

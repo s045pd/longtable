@@ -12,3 +12,11 @@ export function randomId(length = 12): string {
 
 export const newBoardId = () => randomId(10);
 export const BOARD_ID = /^[a-z0-9]{10}$/;
+
+/**
+ * The secret half of a board's links (26 characters, 130 bits): a board's
+ * address alone opens nothing. Links carry it after the "#", which browsers
+ * never send to a server, so it stays out of logs and referrers.
+ */
+export const newKey = () => randomId(26);
+export const KEY = /^[a-z0-9]{26}$/;

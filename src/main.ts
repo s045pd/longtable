@@ -11,22 +11,78 @@ import { Board } from "./board/app";
 import { BOARD_ID, newBoardId } from "./shared/ids";
 import { TEMPLATES, type TemplateName } from "./shared/templates";
 import { renderLanding } from "./landing";
+import { keysFromHash, loadKeys, saveKeys } from "./board/identity";
 
 const app = document.getElementById("app")!;
 const params = new URLSearchParams(location.search);
 export const LIVE = import.meta.env.PROD || params.has("live");
 
-/** Make a board and go to it. */
-export async function startBoard(template: TemplateName) {
-  let id: string;
-  if (LIVE) {
-    const res = await fetch("/api/boards", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ template }) });
-    if (!res.ok) throw new Error(`Could not start a board (${res.status})`);
-    id = ((await res.json()) as { id: string }).id;
-  } else id = newBoardId();
-  const url = `/b/${id}${LIVE ? "" : `?t=${template}`}`;
-  history.pushState({}, "", url);
+const TEAM = "longtable:team";
+
+/**
+ * Make a board and go to it. On a Longtable whose owner set a team password,
+ * the first board asks for it (this browser remembers it).
+ */
+export async function startBoard(template: TemplateName, password?: string) {
+  if (!LIVE) {
+    history.pushState({}, "", `/b/${newBoardId()}?t=${template}`);
+    return route();
+  }
+  let saved: string | undefined;
+  try {
+    saved = localStorage.getItem(TEAM) ?? undefined;
+  } catch {
+    // no storage: ask each time
+  }
+  const pw = password ?? saved;
+  // Ask first rather than be turned away, when this Longtable has a team password.
+  if (!pw) {
+    const health = (await fetch("/api/health").then((r) => r.json()).catch(() => ({}))) as { createPassword?: boolean };
+    if (health.createPassword) return askTeamPassword(template, {});
+  }
+  const res = await fetch("/api/boards", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ template, ...(pw ? { password: pw } : {}) }) });
+  if (res.status === 401 || res.status === 429) {
+    const body = (await res.json().catch(() => ({}))) as { wait?: number };
+    try {
+      localStorage.removeItem(TEAM);
+    } catch {
+      // ignore
+    }
+    return askTeamPassword(template, { wrong: !!pw && pw === password, wait: body.wait });
+  }
+  if (!res.ok) throw new Error(`Could not start a board (${res.status})`);
+  const made = (await res.json()) as { id: string; edit: string; owner: string };
+  if (pw) {
+    try {
+      localStorage.setItem(TEAM, pw);
+    } catch {
+      // ignore
+    }
+  }
+  saveKeys(made.id, { key: made.edit, owner: made.owner });
+  history.pushState({}, "", `/b/${made.id}#k=${made.edit}`);
   route();
+}
+
+/** This Longtable is kept for one team: starting a board needs the team password. */
+function askTeamPassword(template: TemplateName, info: { wrong?: boolean; wait?: number }) {
+  app.className = "landing";
+  app.innerHTML = `<main class="lost team">
+    <h1>Starting a board needs the team password</h1>
+    <p>Whoever runs this Longtable set one, so only their team can make boards here. Boards you’re sent a link to open without it.</p>
+    <form class="team-form">
+      <label class="field"><span>Team password</span><input type="password" name="pw" autocomplete="current-password" required /></label>
+      <p class="form-error" aria-live="polite">${info.wait ? `Too many tries: wait ${info.wait < 60 ? `${info.wait} s` : `${Math.ceil(info.wait / 60)} min`}.` : info.wrong ? "That’s not it. Try again." : ""}</p>
+      <div class="actions"><a class="btn ghost" href="/">Watch the demo</a><button class="btn primary" type="submit">Start the board</button></div>
+    </form>
+  </main>`;
+  const form = app.querySelector("form")!;
+  const input = form.querySelector("input")!;
+  input.focus();
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    if (input.value) startBoard(template, input.value).catch(() => (location.href = "/"));
+  });
 }
 
 function route() {
@@ -40,7 +96,9 @@ function route() {
     const t = params.get("t");
     const template = (TEMPLATES as readonly string[]).includes(t ?? "") ? (t as TemplateName) : "blank";
     if (t) history.replaceState({}, "", `/b/${m[1]}`);
-    new Board(app, m[1], { live: LIVE, template });
+    // A link's keys win over what this device kept.
+    const keys = { ...loadKeys(m[1]), ...keysFromHash(location.hash) };
+    new Board(app, m[1], { live: LIVE, template, keys });
     return;
   }
   // The front page is the demo: it plays as soon as you arrive.
@@ -63,4 +121,6 @@ function route() {
 }
 
 addEventListener("popstate", () => location.reload());
+// Pasting another board's link into the address bar only changes the hash.
+addEventListener("hashchange", () => location.reload());
 route();

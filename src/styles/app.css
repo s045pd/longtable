@@ -2183,3 +2183,275 @@ a.btn {
     transition-delay: 0s !important;
   }
 }
+
+/* ------------------------------------------------------------------ access */
+.btn.danger {
+  background: #3a2125;
+  border-color: #5c2b33;
+  color: #ffb3b8;
+}
+.btn.danger:hover {
+  background: #4a272d;
+}
+.btn:disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+.linkish {
+  margin-left: auto;
+  padding: 4px 8px;
+  border-radius: 8px;
+  color: var(--chalk);
+  font-weight: 600;
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.linkish:hover {
+  background: var(--hover);
+}
+.share-dialog .card,
+.settings-dialog .card {
+  width: min(520px, 100%);
+}
+.share-link {
+  margin: 16px 0 0;
+}
+.share-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  font-size: 14px;
+}
+.share-label span {
+  color: var(--muted);
+  font-size: 13px;
+}
+.share-link .linkrow {
+  margin: 8px 0 0;
+}
+.share-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 18px 0 14px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--raise);
+  color: #b9bcc6;
+  font-size: 14px;
+}
+.share-status svg {
+  flex: none;
+  width: 18px;
+  height: 18px;
+}
+.share-status b {
+  color: var(--chalk);
+}
+.share-status.on svg {
+  color: #ffd66b;
+}
+.set {
+  margin: 14px 0 0;
+  padding: 14px 0 0;
+  border-top: 1px solid var(--bar-line);
+}
+.set h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  font-size: 15px;
+}
+.set h3 svg {
+  width: 18px;
+  height: 18px;
+  color: var(--muted);
+}
+.set p {
+  color: #b9bcc6;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.set .row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.set.danger h3 svg {
+  color: #ff8f97;
+}
+.dialog .field,
+.gate .field {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+.dialog .field input,
+.gate .field input,
+.team .field input {
+  flex: none;
+  width: 100% !important;
+}
+.show {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 14px;
+}
+.dialog input[type="checkbox"] {
+  width: 16px !important;
+  height: 16px !important;
+  accent-color: var(--chalk);
+}
+.form-error,
+.gate .form-error,
+.dialog .form-error {
+  min-height: 1.3em;
+  margin: 8px 0 0 !important;
+  color: #ff9aa1;
+  font-size: 14px;
+}
+.avatar.watching::after {
+  content: "";
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid var(--bar);
+  background: var(--muted)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z' fill='none' stroke='%2317181c' stroke-width='3'/%3E%3C/svg%3E")
+    center / 9px no-repeat;
+}
+
+/* The watch link: look, point, react. */
+.view-only .toolbar .tool[data-tool="note"],
+.view-only .toolbar .tool[data-tool="pen"],
+.view-only .toolbar .tool[data-tool="text"],
+.view-only .toolbar .tool[data-tool="check"],
+.view-only .toolbar .undo,
+.view-only .toolbar .redo,
+.view-only .toolbar .sep.desk,
+.view-only .tidy-pill,
+.view-only .selbar,
+.view-only .empty-hint,
+.view-only .sample-btn {
+  display: none !important;
+}
+.view-only .names span {
+  cursor: default;
+}
+
+/* The screen in front of a board: its password, or why it won't open. */
+.gate {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(16, 17, 20, 0.9);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+.gate-card {
+  width: min(420px, 100%);
+  padding: 28px 24px 22px;
+  border-radius: 20px;
+  background: var(--bar);
+  border: 1.5px solid var(--bar-line);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+}
+.gate-card.shake {
+  animation: gate-shake 0.36s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+@keyframes gate-shake {
+  20%,
+  60% {
+    transform: translateX(-7px);
+  }
+  40%,
+  80% {
+    transform: translateX(7px);
+  }
+}
+.gate-icon {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 14px;
+  border-radius: 14px;
+  background: var(--raise);
+  color: var(--chalk);
+}
+.gate h1 {
+  margin: 0 0 8px;
+  font: 800 26px/1.15 var(--display);
+  letter-spacing: -0.02em;
+}
+.gate p {
+  margin: 0 0 12px;
+  color: #b9bcc6;
+  line-height: 1.45;
+}
+.gate input {
+  height: 48px;
+  padding: 0 14px;
+  border-radius: 11px;
+  background: var(--raise);
+  border: 1px solid #33353f;
+  outline: none;
+  font-size: 16px;
+}
+.gate input:focus {
+  border-color: var(--chalk);
+}
+.gate .btn.big {
+  width: 100%;
+  margin-top: 6px;
+}
+.gate .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+}
+.gate .fine {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.gated .topbar,
+.gated .toolbar,
+.gated .tidy-pill,
+.gated .selbar,
+.gated .corner,
+.gated .empty-hint,
+.gated .status {
+  visibility: hidden;
+}
+.team .field {
+  flex-direction: column;
+  align-items: stretch;
+  max-width: 360px;
+}
+.team input {
+  height: 48px;
+  padding: 0 14px;
+  border-radius: 11px;
+  background: var(--raise);
+  border: 1px solid #33353f;
+  font-size: 16px;
+}
+.team .actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+.avatar.watching { position: relative; }

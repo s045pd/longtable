@@ -84,7 +84,8 @@ export function attachInput(board: Board) {
 
     if (board.editor.id && board.editor.id !== target) board.editor.commit();
 
-    if (e.button === 1 || space || board.tool === "hand") {
+    // On the watch link every press pans: there is nothing to pick up.
+    if (e.button === 1 || space || board.tool === "hand" || (board.readOnly && !board.demo)) {
       stopFollowing();
       g = { kind: "pan", id: e.pointerId, lx: sx, ly: sy };
       board.root.classList.add("panning");
