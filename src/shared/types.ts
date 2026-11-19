@@ -23,6 +23,14 @@ export interface NoteItem extends BaseItem {
   day?: number;
   /** A time picked by hand, in minutes after midnight; -2 = no time; -1 or absent = read from the words. */
   time?: number;
+  /**
+   * A date picked by hand or read from a chat, YYYY-MM-DD: it wins over `day`
+   * and puts the note in that date's own week, which may not be the board's.
+   * "" or absent = none.
+   */
+  date?: string;
+  /** Whose it is: a name, shown as a tag on the note. "" or absent = nobody in particular. */
+  who?: string;
 }
 
 /** Big chalk words typed straight onto the canvas: a section heading. */
@@ -69,6 +77,12 @@ export interface StrokeItem extends BaseItem {
 export interface WeekItem extends BaseItem {
   type: "week";
   cols: number;
+  /**
+   * The Monday of the week it shows, YYYY-MM-DD. Absent or "" = the board's
+   * own week (meta.weekOf); a tidy adds a week like this for each other week
+   * that dated notes fall in.
+   */
+  of?: string;
 }
 
 export type Item = NoteItem | LabelItem | CheckItem | PhotoItem | StrokeItem | WeekItem;
@@ -100,6 +114,8 @@ export interface Effect {
   delays: Record<string, number>;
   /** The week the tidy laid out, so every viewer can type its headers in. */
   week: string;
+  /** Every week the tidy laid out, in order, when there are more than one. */
+  weeks?: string[];
   /** How many notes went into the week. */
   count: number;
 }
@@ -149,8 +165,8 @@ export type AdminAct = "password" | "links" | "delete";
 export interface PlanNote {
   /** What to do, short, in the chat's own language. */
   text: string;
-  /** 0 = Monday … 6 = Sunday, or null when the chat names no day. */
-  day: number | null;
+  /** The date it happens or is due, YYYY-MM-DD, or null when the chat names none. */
+  date: string | null;
   /** Minutes after midnight, or null when no time is given. */
   time: number | null;
   /** Who it falls to, when the chat says so. */

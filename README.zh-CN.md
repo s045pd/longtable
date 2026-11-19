@@ -64,19 +64,24 @@
 没写日子的进「Any day」那列；照片、清单和标题排在这一周下面。以后再整理一次，
 新加的便签会插进已经排好的一周。撤销一次就能全部恢复。
 
-想自己定也可以：按 **Day**（`D`）手动选哪天、几点，或者直接把便签拖进某一列。
+便签也可以带一个具体日期。今天要做的留在这一周，下周的事在下面单独排一周，
+所以一块白板上「今天」和「下周三」能同时排对，不会把整批事情都推到下一周。
+
+想自己定也可以：按 **Day**（`D`）手动选日期、几点、谁来做，或者直接把便签拖进某一列。
+谁来做显示成便签角上的名字标签，不再写成文字里的「@谁」。
 
 </td>
 </tr>
 <tr>
-<td width="50%"><img src="docs/images/plan.png" alt="“6 notes from the chat” 对话框：Flyers out 周四 08:00 归 Ana，Bring cake stand 周五归 Bo，Call printer 周五归 Cy，试吃 周四 16:00，订蛋糕 归小王，Count till 周日归 Eli，每条前面有勾选框，下面勾着 “Tidy them into the week”。" /></td>
+<td width="50%"><img src="docs/images/plan.png" alt="“6 notes from the chat” 对话框：Flyers out 26 日周四 08:00 归 Ana，Bring the cake stand 和 Call the printer 11 月 20 日周五归 Bo 和 Cy，试吃 11 月 19 日周四 16:00、订蛋糕 归小王，Count the till 11 月 22 日周日归 Eli，每条前面有勾选框、后面有名字标签，下面勾着 “Tidy them into the week”。" /></td>
 <td width="50%" valign="top">
 
 ### 群聊记录一贴，就是一份计划
 
 把群聊、会议记录或待办清单贴进来（或者点工具栏上的聊天按钮），
 [Workers AI](https://developers.cloudflare.com/workers-ai/) 会挑出要做的事：一件事一张便签，
-带上哪天、几点、谁来做。它先把整段聊天读完再回答，所以「还是改到周五吧」会挪动原来那件事，
+带上日期、几点、谁来做。「今天」「明天」「下周三」都按今天的日期算成具体哪一天；
+它先把整段聊天读完再回答，所以「还是改到周五吧」会挪动原来那件事，
 而不是多出一张；中文说的事还是中文，英文说的还是英文。看一遍，把不要的取消勾选，
 加进白板时顺手排进这一周。
 
@@ -94,7 +99,21 @@
 每张写了日子的便签都是一个日程，有时间的是定时日程，没时间的是全天日程；计划一改，
 日历会自己跟着变。不用登录，也不用装任何东西。
 
-同一个对话框里还能复制成 Markdown 发到群里，或者下载 **CSV**（用表格打开）和一次性的 **`.ics`** 文件。
+切到 **Just mine（只看我的）**，日历、文字和文件里就只剩标着你名字（或者写了「@你」）的便签，
+每个人都能只订阅自己的事。同一个对话框里还能复制成 Markdown 发到群里，
+或者下载 **CSV**（用表格打开）和一次性的 **`.ics`** 文件。
+
+</td>
+<td width="50%"><img src="docs/images/export.png" alt="导出对话框，选着 “Just Ana’s”：上面是 “Keep it in your calendar”，有谷歌日历、苹果日历、Outlook 和复制链接；下面是白板的那一周、Ana 的便签清单，再下面是图片、表格、日历文件三个按钮和 “Copy as text”。" /></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/images/picture.png" alt="导出的整周图片：“Pell & Rye · Opening week”，本周和下周两排日期列，每张便签按颜色画出来，带时间和名字标签，下面 “Also on the board” 是照片和烘焙清单。" /></td>
+<td width="50%" valign="top">
+
+### 整周导出成一张图
+
+点 **Picture**，把整周画成一张清晰的 PNG：每张卡片带时间和名字标签，照片和清单也在，
+直接发到群里。手机上会弹出系统分享。**Just mine** 在这里也管用。
 
 ### 手机能用，断网一会儿也不丢
 
@@ -102,7 +121,6 @@
 连上之后自动发出去。
 
 </td>
-<td width="50%"><img src="docs/images/export.png" alt="导出对话框：上面是 “Keep it in your calendar”，有谷歌日历、苹果日历、Outlook 和复制链接四个按钮；下面是这一周的 Markdown 清单和导出 CSV、日历文件的按钮。" /></td>
 </tr>
 </table>
 
@@ -182,7 +200,7 @@ CLOUDFLARE_API_TOKEN=… npm run setup -- --yes --name longtable --team-password
 | 按键 | 作用 | 按键 | 作用 |
 | --- | --- | --- | --- |
 | `V` | 选择 | `U` | 整理（Tidy up） |
-| `N` | 便签 | `D` | 给选中的便签选日子 |
+| `N` | 便签 | `D` | 选日期、时间和谁来做 |
 | `T` | 标题 | `Enter` | 编辑选中的便签 |
 | `C` | 清单 | `Delete` | 删除 |
 | `P` | 画笔 | 方向键 | 微调位置（按住 `Shift` 移得更多） |
@@ -213,7 +231,7 @@ npm run build && npm run e2e
 （第一次需要 `npx playwright install chromium`）。它覆盖多人实时编辑、整理、导出，
 以及所有隐私规则：没有密钥和瞎编密钥的链接、只读链接（也包括直接连服务器的脚本）、
 密码和输错之后的等待、同时发出的一堆猜测、换链接、清空、删除、团队密码、建白板的频率限制和安全响应头。
-它还会贴一段聊天记录，检查日历订阅和它的密钥；测已经部署好的站点时，聊天记录会真的交给 Workers AI 读。
+它还会贴一段聊天记录，检查日历订阅和它的密钥，以及下周的便签单独排一周、名字标签、「只看我的」和导出图片；测已经部署好的站点时，聊天记录会真的交给 Workers AI 读。
 要测已经部署好的站点：`BASE_URL=https://… npm run e2e`（设了团队密码就再加 `TEAM_PASSWORD=…`）。
 
 ## 怎么做的

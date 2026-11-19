@@ -1,39 +1,58 @@
 // The week, out of the board: as text (Markdown), as a spreadsheet (CSV) and
-// as a calendar (iCalendar). Notes are grouped by their day (picked by hand,
-// or else the one their words name) and ordered like the tidy orders them;
-// notes with a time become timed events, the rest all-day ones.
-import { DAY_NAMES, dateOf, formatTime, noteDay, noteTime } from "./days";
+// as a calendar (iCalendar). Notes are grouped by their date (a date of their
+// own, or the board's week and the day picked or named in the words) and
+// ordered like the tidy orders them; notes with a time become timed events,
+// the rest all-day ones. Any of them can be narrowed to one person's notes.
+import { DAY_NAMES, formatTime, isFor, noteDate, noteDay, noteTime, noteWho, parseIso } from "./days";
 import type { CheckItem, Item, Meta, NoteItem } from "./types";
 
 export interface WeekEntry {
   id: string;
+  /** YYYY-MM-DD, or null for any day (or a weekday on a board with no week). */
+  date: string | null;
   day: number | null;
   /** Minutes after midnight, or null for all day. */
   time: number | null;
   /** The note's words on one line. */
   text: string;
+  /** Whose it is, or "". */
+  who: string;
   by: string;
   votes: number;
 }
 
+/** What to export: everything, or only the notes for one person (by their tag, or an @mention). */
+export interface ExportOptions {
+  who?: string;
+}
+
 const oneLine = (s: string) => s.replace(/\s*\n\s*/g, " ").replace(/\s+/g, " ").trim();
 
-export function weekEntries(items: Item[]): WeekEntry[] {
-  const notes = items.filter((it): it is NoteItem => it.type === "note" && it.text.trim() !== "");
+/** The items an export covers: with `who`, only that person's notes. */
+export function itemsFor(items: Item[], opts: ExportOptions = {}): Item[] {
+  const who = opts.who?.trim();
+  return who ? items.filter((it) => it.type === "note" && isFor(it, who)) : items;
+}
+
+export function weekEntries(items: Item[], weekOf = "", opts: ExportOptions = {}): WeekEntry[] {
+  const notes = itemsFor(items, opts).filter((it): it is NoteItem => it.type === "note" && it.text.trim() !== "");
   const entries = notes.map((n) => ({
     id: n.id,
+    date: noteDate(n, weekOf),
     day: noteDay(n),
     time: noteTime(n),
     text: oneLine(n.text),
+    who: noteWho(n),
     by: n.by ?? "",
     votes: Object.keys(n.votes ?? {}).length,
     y: n.y,
     x: n.x,
   }));
+  const key = (e: { date: string | null; day: number | null }) => e.date ?? (e.day !== null ? `~${e.day}` : "~~");
   entries.sort((a, b) => {
-    const da = a.day ?? 7;
-    const db = b.day ?? 7;
-    if (da !== db) return da - db;
+    const da = key(a);
+    const db = key(b);
+    if (da !== db) return da < db ? -1 : 1;
     if (a.time === null && b.time !== null) return -1;
     if (b.time === null && a.time !== null) return 1;
     if (a.time !== null && b.time !== null && a.time !== b.time) return a.time - b.time;
@@ -42,41 +61,46 @@ export function weekEntries(items: Item[]): WeekEntry[] {
   return entries.map(({ x: _x, y: _y, ...e }) => e);
 }
 
-const dayTitle = (weekOf: string, day: number) => {
-  const d = dateOf(weekOf, day);
-  return `${DAY_NAMES[day]} ${d.getDate()} ${d.toLocaleString("en-GB", { month: "short" })}`;
+const dayTitle = (iso: string) => {
+  const d = parseIso(iso);
+  return `${DAY_NAMES[(d.getDay() + 6) % 7]} ${d.getDate()} ${d.toLocaleString("en-GB", { month: "short" })}`;
 };
 
 export const boardTitle = (meta: Meta) => [meta.client, meta.file].filter((s) => s.trim()).join(" · ") || "Longtable board";
 
-export function toMarkdown(meta: Meta, items: Item[]): string {
-  const entries = weekEntries(items);
-  const out = [`# ${boardTitle(meta)}`, ""];
-  if (meta.weekOf) out.push(`Week of ${dayTitle(meta.weekOf, 0)}`, "");
-  for (let day = 0; day < 8; day++) {
-    const list = entries.filter((e) => (e.day ?? 7) === day);
-    if (!list.length) continue;
-    out.push(`## ${day < 7 ? (meta.weekOf ? dayTitle(meta.weekOf, day) : DAY_NAMES[day]) : "Any day"}`);
-    for (const e of list) out.push(`- [ ] ${e.time !== null ? `${formatTime(e.time)} ` : ""}${e.text}${e.votes ? ` (${e.votes} ${e.votes === 1 ? "vote" : "votes"})` : ""}`);
-    out.push("");
+export function toMarkdown(meta: Meta, items: Item[], opts: ExportOptions = {}): string {
+  const entries = weekEntries(items, meta.weekOf, opts);
+  const who = opts.who?.trim();
+  const out = [`# ${boardTitle(meta)}${who ? ` · ${who}` : ""}`, ""];
+  if (meta.weekOf) out.push(`Week of ${dayTitle(meta.weekOf)}`, "");
+  let heading = "";
+  for (const e of entries) {
+    const h = e.date ? dayTitle(e.date) : e.day !== null ? DAY_NAMES[e.day] : "Any day";
+    if (h !== heading) {
+      if (heading) out.push("");
+      out.push(`## ${h}`);
+      heading = h;
+    }
+    const tail = `${e.who && !who ? ` · ${e.who}` : ""}${e.votes ? ` (${e.votes} ${e.votes === 1 ? "vote" : "votes"})` : ""}`;
+    out.push(`- [ ] ${e.time !== null ? `${formatTime(e.time)} ` : ""}${e.text}${tail}`);
   }
-  const lists = items.filter((it): it is CheckItem => it.type === "check");
+  if (heading) out.push("");
+  const lists = who ? [] : items.filter((it): it is CheckItem => it.type === "check");
   for (const list of lists) {
     out.push(`## ${list.title || "Checklist"}`);
     for (const r of list.rows) out.push(`- [${r.done ? "x" : " "}] ${r.text}`);
     out.push("");
   }
-  if (!entries.length && !lists.length) out.push("_Nothing on the board yet._", "");
+  if (!entries.length && !lists.length) out.push(who ? `_Nothing for ${who} on the board yet._` : "_Nothing on the board yet._", "");
   return out.join("\n").trimEnd() + "\n";
 }
 
 const csvCell = (s: string) => (/[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
 
-export function toCsv(meta: Meta, items: Item[]): string {
-  const rows = [["day", "date", "time", "note", "by", "votes"]];
-  for (const e of weekEntries(items)) {
-    const date = e.day !== null && meta.weekOf ? isoOf(dateOf(meta.weekOf, e.day)) : "";
-    rows.push([e.day !== null ? DAY_NAMES[e.day] : "Any day", date, e.time !== null ? formatTime(e.time) : "", e.text, e.by, String(e.votes)]);
+export function toCsv(meta: Meta, items: Item[], opts: ExportOptions = {}): string {
+  const rows = [["day", "date", "time", "note", "who", "by", "votes"]];
+  for (const e of weekEntries(items, meta.weekOf, opts)) {
+    rows.push([e.day !== null ? DAY_NAMES[e.day] : "Any day", e.date ?? "", e.time !== null ? formatTime(e.time) : "", e.text, e.who, e.by, String(e.votes)]);
   }
   return rows.map((r) => r.map(csvCell).join(",")).join("\r\n") + "\r\n";
 }
@@ -118,17 +142,19 @@ export interface FeedOptions {
  * Each event keeps its note's id, so a calendar that subscribes to the feed
  * moves and renames events as the board changes instead of adding new ones.
  */
-export function toIcs(meta: Meta, items: Item[], boardId: string, now = new Date(), feed?: FeedOptions): string {
+export function toIcs(meta: Meta, items: Item[], boardId: string, now = new Date(), feed?: FeedOptions, opts: ExportOptions = {}): string {
   const stamp = now.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
-  const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", `PRODID:-//Longtable//${feed ? "Week feed" : "Week export"}//EN`, "CALSCALE:GREGORIAN", `X-WR-CALNAME:${icsText(boardTitle(meta))}`];
+  const who = opts.who?.trim();
+  const name = `${boardTitle(meta)}${who ? ` · ${who}` : ""}`;
+  const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", `PRODID:-//Longtable//${feed ? "Week feed" : "Week export"}//EN`, "CALSCALE:GREGORIAN", `X-WR-CALNAME:${icsText(name)}`];
   if (feed) {
-    lines.push("METHOD:PUBLISH", `X-WR-CALDESC:${icsText(`The week on the Longtable board ${boardTitle(meta)}. It follows the board as it changes.`)}`);
+    lines.push("METHOD:PUBLISH", `X-WR-CALDESC:${icsText(`${who ? `${who}'s notes on` : "The week on"} the Longtable board ${boardTitle(meta)}. It follows the board as it changes.`)}`);
     lines.push("REFRESH-INTERVAL;VALUE=DURATION:PT1H", "X-PUBLISHED-TTL:PT1H");
     if (feed.tz) lines.push(`X-WR-TIMEZONE:${feed.tz}`);
   }
-  for (const e of weekEntries(items)) {
-    if (e.day === null || !meta.weekOf) continue;
-    const date = dateOf(meta.weekOf, e.day);
+  for (const e of weekEntries(items, meta.weekOf, opts)) {
+    if (!e.date) continue;
+    const date = parseIso(e.date);
     lines.push("BEGIN:VEVENT", `UID:${e.id}.${boardId}@longtable`, `DTSTAMP:${stamp}`);
     if (e.time === null) {
       const next = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1);
@@ -142,8 +168,9 @@ export function toIcs(meta: Meta, items: Item[], boardId: string, now = new Date
       const em = String(end % 60).padStart(2, "0");
       lines.push(`DTSTART:${icsDate(date)}T${hh}${mm}00`, `DTEND:${icsDate(endDate)}T${eh}${em}00`);
     }
-    lines.push(`SUMMARY:${icsText(e.text)}`);
-    if (e.by) lines.push(`DESCRIPTION:${icsText(`From ${boardTitle(meta)}, added by ${e.by}.`)}`);
+    lines.push(`SUMMARY:${icsText(e.who && !who ? `${e.text} · ${e.who}` : e.text)}`);
+    const about = [e.who ? `For ${e.who}.` : "", `From ${boardTitle(meta)}${e.by ? `, added by ${e.by}` : ""}.`].filter(Boolean).join(" ");
+    lines.push(`DESCRIPTION:${icsText(about)}`);
     lines.push("END:VEVENT");
   }
   lines.push("END:VCALENDAR");

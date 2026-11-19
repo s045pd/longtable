@@ -28,6 +28,18 @@ export interface Env {
   AI_MODEL?: string;
 }
 
+/**
+ * The day it is for whoever starts a board (their own date, YYYY-MM-DD, within
+ * a day of the server's), so "this week" is their week, not the server's.
+ */
+function localToday(today?: string): Date {
+  const now = new Date();
+  if (!today || !/^\d{4}-\d{2}-\d{2}$/.test(today)) return now;
+  const [y, m, d] = today.split("-").map(Number);
+  const t = new Date(y, m - 1, d);
+  return Math.abs(t.getTime() - now.getTime()) < 2 * 86_400_000 ? t : now;
+}
+
 /** Good at Chinese and English, and cheap: a group chat costs 40 to 80 neurons, so the free plan's 10,000 a day read 150 or more. */
 export const DEFAULT_AI_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8";
 /** Chats one address may have read on one board in an hour, so nobody spends the day's free AI alone. */
@@ -185,10 +197,10 @@ export class BoardRoom extends DurableObject<Env> {
   }
 
   /** Fill a new board from a template and give it keys. Returns null for a board that already exists. */
-  async seed(template: string): Promise<NewBoard | null> {
+  async seed(template: string, today?: string): Promise<NewBoard | null> {
     if (this.seeded || this.deletedAt) return null;
     const name: TemplateName = (TEMPLATES as readonly string[]).includes(template) ? (template as TemplateName) : "blank";
-    const seed = makeTemplate(name);
+    const seed = makeTemplate(name, localToday(today));
     const { lock, ownerKey } = await newLock();
     this.lock = lock;
     this.state = new BoardState(seed.meta, seed.items);
@@ -238,7 +250,7 @@ export class BoardRoom extends DurableObject<Env> {
     const url = new URL(request.url);
     if (url.pathname.endsWith("/snapshot")) return this.snapshot(request);
     const cal = /^\/api\/boards\/([a-z0-9]+)\/cal\/([a-z0-9]+)\.ics$/.exec(url.pathname);
-    if (cal) return this.calendar(cal[1], cal[2], url.searchParams.get("tz"));
+    if (cal) return this.calendar(cal[1], cal[2], url.searchParams.get("tz"), url.searchParams.get("who"));
     if (request.headers.get("Upgrade") !== "websocket") return new Response("Expected a WebSocket", { status: 426 });
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
@@ -266,12 +278,14 @@ export class BoardRoom extends DurableObject<Env> {
    * can't keep one after a #), opens only this: no edits, no live board.
    * New links or a new password give the board a new one.
    */
-  private calendar(boardId: string, key: string, tz: string | null): Response {
+  private calendar(boardId: string, key: string, tz: string | null, who: string | null): Response {
     const headers = { "cache-control": "no-cache", "x-content-type-options": "nosniff", "x-robots-tag": "noindex, nofollow", "referrer-policy": "no-referrer" };
     if (this.deletedAt) return new Response("This board was deleted.\n", { status: 410, headers });
     if (!this.seeded || !this.lock?.cal || !same(key, this.lock.cal)) return new Response("No such calendar.\n", { status: 404, headers });
     const meta = this.state.meta;
-    return new Response(toIcs(meta, this.state.list(), boardId, new Date(), { tz: cleanZone(tz) }), {
+    // ?who=Ana: only the notes for Ana, so each person can subscribe to their own.
+    const person = cleanName(who ?? "");
+    return new Response(toIcs(meta, this.state.list(), boardId, new Date(), { tz: cleanZone(tz) }, { who: person }), {
       headers: { ...headers, "content-type": "text/calendar; charset=utf-8", "content-disposition": `inline; filename="${fileStem(meta)}.ics"` },
     });
   }
@@ -414,7 +428,7 @@ export class BoardRoom extends DurableObject<Env> {
       // How much of the day's free Workers AI it used: counts only, never the words.
       const usage = (raw as { usage?: unknown } | null)?.usage;
       if (usage) console.log("plan: tokens", JSON.stringify(usage));
-      const notes = readPlan(raw);
+      const notes = readPlan(raw, today);
       if (notes === null) return reply({ ok: false, why: "failed" });
       reply(notes.length ? { ok: true, notes } : { ok: false, why: "empty" });
     } catch (e) {

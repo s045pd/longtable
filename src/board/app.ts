@@ -3,11 +3,11 @@
 // remembered for undo, and sent to the room, which passes it on to everyone
 // else. Their changes arrive as ops too and are applied the same way.
 import { PALETTE, freeColor } from "../shared/colors";
-import { DAY_NAMES, dateOf, noteDay } from "../shared/days";
-import { bounds, setLabelMeasure, union, type Box } from "../shared/geometry";
+import { DAY_NAMES, noteDate, noteDay, parseIso } from "../shared/days";
+import { PITCH_X, bounds, setLabelMeasure, union, type Box } from "../shared/geometry";
 import { randomId } from "../shared/ids";
 import { BoardState } from "../shared/state";
-import { FLIGHT, notesInWeek, planTidy, waveDelay } from "../shared/tidy";
+import { FLIGHT, notesInWeek, planTidy, waveDelay, weeksOn } from "../shared/tidy";
 import type { TemplateName } from "../shared/templates";
 import type { Access, AdminAct, DeniedReason, Effect, Item, NoteItem, Op, Person, PlanNote, Presence, ReactionKind } from "../shared/types";
 import { Camera, type Insets } from "./camera";
@@ -20,7 +20,7 @@ import { DemoLink, LiveLink, LocalLink, type BoardKeys, type InitData, type Link
 import { Demo } from "./demo";
 import { nextMonday } from "../shared/days";
 import { People } from "./people";
-import { ItemView, setWeekOf, type Motion } from "./views";
+import { ItemView, setNameColors, setWeekOf, type Motion } from "./views";
 import { Editor } from "./editor";
 import { SampleTeam } from "./sample-team";
 
@@ -145,6 +145,13 @@ export class Board {
     this.root.append(this.stage, this.overlay);
     this.grid = new Grid(canvas);
     this.people = new People(this.overlay);
+    // A name on a note takes that person's colour when they are here.
+    setNameColors((name) => {
+      const k = name.trim().toLowerCase();
+      if (this.me.name.trim().toLowerCase() === k) return this.me.color;
+      for (const p of this.people.all.values()) if (p.name.trim().toLowerCase() === k) return p.color;
+      return undefined;
+    });
     this.chrome = new Chrome(this);
     this.editor = new Editor(this);
     this.sampleTeam = new SampleTeam(this);
@@ -553,16 +560,15 @@ export class Board {
    * Pick the day and/or time of the selected notes by hand. Notes already in
    * the week move to their new column, in the same undo step.
    */
-  setWhen(set: { day?: number; time?: number }) {
+  setWhen(set: { day?: number; time?: number; date?: string; who?: string }) {
     this.editor.commit();
     const notes = this.selected().filter((it): it is NoteItem => it.type === "note");
     if (!notes.length) return;
     const ops: Op[] = notes.map((n) => ({ op: "patch", id: n.id, set }) as Op);
-    const week = this.state.list().find((it) => it.type === "week");
-    const inWeek = week ? new Set(this.weekNotes(week.id)) : new Set<string>();
-    const moving = notes.filter((n) => inWeek.has(n.id)).map((n) => n.id);
+    const inWeek = new Set(weeksOn(this.state.list()).flatMap((w) => this.weekNotes(w.id)));
+    const moving = "day" in set || "date" in set ? notes.filter((n) => inWeek.has(n.id)).map((n) => n.id) : [];
     const back = this.commit(ops, { history: false });
-    const plan = moving.length ? planTidy(this.state.list(), moving, () => this.newItemId()) : null;
+    const plan = moving.length ? planTidy(this.state.list(), moving, () => this.newItemId(), this.state.meta.weekOf) : null;
     const back2 = plan ? this.commit(plan.ops, { history: false, motion: () => ({ kind: "spring", delay: 0 }) }) : [];
     this.remember([...back2, ...back], [...ops, ...(plan?.ops ?? [])]);
     this.chrome.onSelection();
@@ -570,13 +576,13 @@ export class Board {
 
   /** After a drop into the week: say which day a note now belongs to. */
   announceDays(ops: Op[]) {
-    const picked = ops.filter((op): op is Extract<Op, { op: "patch" }> => op.op === "patch" && "day" in op.set);
+    const picked = ops.filter((op): op is Extract<Op, { op: "patch" }> => op.op === "patch" && ("day" in op.set || "date" in op.set));
     if (!picked.length) return;
     const n = this.state.items.get(picked[0].id);
     if (!n || n.type !== "note") return;
     const day = noteDay(n);
-    const weekOf = this.state.meta.weekOf;
-    const when = day === null ? "any day" : weekOf ? `${DAY_NAMES[day]} ${dateOf(weekOf, day).getDate()} ${dateOf(weekOf, day).toLocaleString("en-GB", { month: "short" })}` : DAY_NAMES[day];
+    const date = noteDate(n, this.state.meta.weekOf);
+    const when = day === null ? "any day" : date ? `${DAY_NAMES[day]} ${parseIso(date).getDate()} ${parseIso(date).toLocaleString("en-GB", { month: "short" })}` : DAY_NAMES[day];
     this.chrome.toast(picked.length === 1 ? `Now on ${when}` : `${picked.length} notes moved to new days`);
   }
 
@@ -622,9 +628,10 @@ export class Board {
         z: z++,
         by: this.me.name,
         color: colorFor(n.who),
-        text: (n.who ? `${n.text} @${n.who}` : n.text).slice(0, 400),
-        ...(n.day !== null ? { day: n.day } : {}),
+        text: n.text.slice(0, 400),
+        ...(n.date ? { date: n.date } : {}),
         ...(n.time !== null ? { time: n.time } : {}),
+        ...(n.who ? { who: n.who.slice(0, 32) } : {}),
       },
     }));
     this.commit(ops);
@@ -645,7 +652,7 @@ export class Board {
     this.editor.commit();
     // A selection without notes would tidy nothing: then tidy the board.
     const targets = this.selected().some((it) => it.type === "note") ? [...this.sel] : null;
-    const plan = planTidy(this.state.list(), targets, () => this.newItemId());
+    const plan = planTidy(this.state.list(), targets, () => this.newItemId(), this.state.meta.weekOf);
     if (!plan) {
       this.chrome.toast("Nothing to tidy: add a note that names a day, like “Flyers out Wed”.");
       return;
@@ -661,8 +668,14 @@ export class Board {
 
   /** The parts of a tidy everyone sees: headers typing in, day words underlined, the closing line. */
   private playTidy(fx: Effect, mine: boolean) {
-    const week = this.views.get(fx.week);
-    week?.typeHeaders((col) => waveDelay(col, 0) + FLIGHT * 0.46);
+    let rowBase = 0;
+    for (const id of fx.weeks ?? [fx.week]) {
+      const week = this.views.get(id);
+      const at = rowBase;
+      week?.typeHeaders((col) => waveDelay(col, at) + FLIGHT * 0.46);
+      const w = this.state.items.get(id);
+      rowBase += w && w.type === "week" ? Math.max(1, ...this.weekColumns(id)) + 1 : 2;
+    }
     for (const [id, delay] of Object.entries(fx.delays)) {
       const v = this.views.get(id);
       if (v?.item.type === "note") v.markDay(delay + FLIGHT * 0.6);
@@ -756,6 +769,19 @@ export class Board {
       if (b.x0 < box.x1 && b.x1 > box.x0 && b.y0 < box.y1 && b.y1 > box.y0) out.push(it.id);
     }
     return out;
+  }
+
+  /** How many notes each column of a week holds. */
+  weekColumns(weekId: string): number[] {
+    const w = this.state.items.get(weekId);
+    if (!w || w.type !== "week") return [];
+    const counts = Array.from({ length: w.cols }, () => 0);
+    for (const id of this.weekNotes(weekId)) {
+      const n = this.state.items.get(id)!;
+      const col = Math.round((n.x - w.x) / PITCH_X);
+      if (col >= 0 && col < counts.length) counts[col]++;
+    }
+    return counts;
   }
 
   /** The notes sitting in a week's columns, so dragging the week brings them along. */

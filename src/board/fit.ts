@@ -46,14 +46,20 @@ function wrap(text: string, width: number): string[] {
   return out;
 }
 
-export function fitNote(text: string): Fit {
-  const hit = cache.get(text);
+/** The words' room on a note; less when a name tag sits at the bottom or a date stamp at the top. */
+export const NOTE_ROOM = HEIGHT;
+export const WHO_ROOM = 30;
+export const STAMP_ROOM = 16;
+
+export function fitNote(text: string, height = HEIGHT): Fit {
+  const key = `${height}|${text}`;
+  const hit = cache.get(key);
   if (hit) return hit;
   let fit: Fit | null = null;
   for (let size = MAX; size >= MIN; size--) {
     ctx.font = NOTE_FONT(size);
     const lines = wrap(text, BOX);
-    if (lines.length * size * 1.16 <= HEIGHT) {
+    if (lines.length * size * 1.16 <= height) {
       fit = { size, lines, clipped: false };
       break;
     }
@@ -61,13 +67,13 @@ export function fitNote(text: string): Fit {
   if (!fit) {
     ctx.font = NOTE_FONT(MIN);
     const lines = wrap(text, BOX);
-    const room = Math.floor(HEIGHT / (MIN * 1.16));
+    const room = Math.floor(height / (MIN * 1.16));
     const kept = lines.slice(0, room);
     kept[room - 1] = (kept[room - 1] ?? "").replace(/.?$/, "…");
     fit = { size: MIN, lines: kept, clipped: true };
   }
   if (cache.size > 2000) cache.clear();
-  cache.set(text, fit);
+  cache.set(key, fit);
   return fit;
 }
 

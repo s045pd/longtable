@@ -10,6 +10,7 @@ import "./styles/app.css";
 import { Board } from "./board/app";
 import { BOARD_ID, newBoardId } from "./shared/ids";
 import { TEMPLATES, type TemplateName } from "./shared/templates";
+import { localIso } from "./shared/plan";
 import { renderLanding } from "./landing";
 import { carryTo, keysFromHash, loadKeys, saveKeys } from "./board/identity";
 
@@ -42,7 +43,7 @@ export async function startBoard(template: TemplateName, password?: string) {
     const health = (await fetch("/api/health").then((r) => r.json()).catch(() => ({}))) as { createPassword?: boolean };
     if (health.createPassword) return askTeamPassword(template, {});
   }
-  const res = await fetch("/api/boards", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ template, ...(pw ? { password: pw } : {}) }) });
+  const res = await fetch("/api/boards", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ template, today: localIso(), ...(pw ? { password: pw } : {}) }) });
   if (res.status === 401 || res.status === 429) {
     const body = (await res.json().catch(() => ({}))) as { error?: string; wait?: number };
     if (body.error === "too-many-boards") {

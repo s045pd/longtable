@@ -140,8 +140,11 @@ Each board's feed is
 `https://<your Longtable>/api/boards/<board>/cal/<key>.ics`. The buttons
 under *Keep it in your calendar* subscribe Google Calendar, Apple Calendar
 or Outlook to it, and *Copy link* is there for anything else that takes a
-calendar address. The feed holds every note that names a day, dated by the
-board's *Week starting*, as timed or all-day events. It asks calendars to
+calendar address. The feed holds every note that names a day, as timed or
+all-day events: a note with a date of its own on that date, the others in
+the board's week. Add `?who=<name>` and it holds only that person's notes
+(tagged with the name or saying “@name”); *Just mine* in the dialog does
+this for you. `?tz=<zone>` sets the time zone of the times. It asks calendars to
 look again every hour and keeps each event's id, so a moved note moves in
 the calendar rather than appearing twice. How often a calendar really looks
 is up to it: Apple and Outlook within hours, Google sometimes only once a

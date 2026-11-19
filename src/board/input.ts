@@ -2,7 +2,7 @@
 // drag, or draw. A press only becomes a drag after it has moved a few
 // pixels, so a click stays a click.
 import { looksLikeAChat } from "../shared/plan";
-import { planDrop } from "../shared/tidy";
+import { planDrop, weeksOn } from "../shared/tidy";
 import type { Item, Op } from "../shared/types";
 import type { Board } from "./app";
 
@@ -119,6 +119,12 @@ export function attachInput(board: Board) {
     if (dayTag && target) {
       board.setSelection([target]);
       board.chrome.openWhen(dayTag);
+      return;
+    }
+    // The name tag of a note already picked: change whose it is.
+    const whoTag = (e.target as HTMLElement).closest<HTMLElement>(".who-tag");
+    if (whoTag && target && board.sel.size === 1 && board.sel.has(target)) {
+      board.chrome.openWhen(whoTag);
       return;
     }
     if (target) {
@@ -243,10 +249,10 @@ export function attachInput(board: Board) {
     if (raise.length) board.commit(raise, { history: false });
     for (const id of carried) board.views.get(id)?.el.classList.add("lifted");
     const [wx, wy] = world(e);
-    const week = board.state.list().find((it) => it.type === "week");
-    const inWeek = new Set(week ? board.weekNotes(week.id) : []);
+    const weeks = weeksOn(board.state.list());
+    const inWeek = new Set(weeks.flatMap((w) => board.weekNotes(w.id)));
     const leaving = [...carried].filter((id) => inWeek.has(id));
-    const weekToo = !!week && carried.has(week.id);
+    const weekToo = weeks.some((w) => carried.has(w.id));
     g = { kind: "drag", id: e.pointerId, wx, wy, start, lastSend: 0, raise: zBefore, leaving, weekToo };
     board.root.classList.add("dragging");
   }
@@ -298,7 +304,7 @@ export function attachInput(board: Board) {
         board.root.classList.remove("dragging");
         // Notes let go of over the week take that column's day and slot in.
         const dropped = [...g.start.keys()].filter((id) => board.state.items.get(id)?.type === "note");
-        const drop = cancelled || g.weekToo ? [] : planDrop(board.state.list(), dropped, g.leaving, () => board.newItemId());
+        const drop = cancelled || g.weekToo ? [] : planDrop(board.state.list(), dropped, g.leaving, () => board.newItemId(), board.state.meta.weekOf);
         if (drop.length) {
           const back = board.commit(drop, { history: false, motion: () => ({ kind: "spring", delay: 0 }) });
           board.remember([...back, ...undo], [...redo, ...drop]);

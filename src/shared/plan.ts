@@ -33,26 +33,40 @@ function plusDays(iso: string, n: number): string {
 }
 
 /** What the model is told, and the chat. */
+/** Three weeks of dates from this week's Monday, so the model need not count days itself. */
+function calendarFrom(today: string): string {
+  const monday = plusDays(today, -((new Date(`${today}T00:00:00Z`).getUTCDay() + 6) % 7));
+  const names = ["this week", "next week (下周)", "the week after (下下周)"];
+  return names
+    .map((name, w) => `${name}: ${Array.from({ length: 7 }, (_, i) => {
+      const d = plusDays(monday, w * 7 + i);
+      return `${weekdayOf(d).slice(0, 3)} ${d}${d === today ? " (today, 今天)" : ""}`;
+    }).join(", ")}`)
+    .join("\n");
+}
+
+/** What the model is told, and the chat. */
 export function planMessages(text: string, weekOf: string, today: string): { role: "system" | "user"; content: string }[] {
   const day = ISO.test(today) ? today : new Date().toISOString().slice(0, 10);
-  const week = ISO.test(weekOf) ? `the week from Monday ${weekOf} to Sunday ${plusDays(weekOf, 6)}` : "one week, Monday to Sunday";
-  const when = `Today is ${weekdayOf(day)} ${day}, so tomorrow (明天) is ${weekdayOf(plusDays(day, 1))} ${plusDays(day, 1)} and the day after (后天) is ${weekdayOf(plusDays(day, 2))} ${plusDays(day, 2)}. The board plans ${week}.`;
+  const week = ISO.test(weekOf) ? ` The board's own week runs from Monday ${weekOf} to Sunday ${plusDays(weekOf, 6)}, but a note can fall in any week.` : "";
   const system = [
-    "You turn a pasted group chat, meeting notes or to-do list into sticky notes for a shared weekly planning board.",
+    "You turn a pasted group chat, meeting notes or to-do list into sticky notes for a shared planning board.",
     "",
     "Reply with JSON only, in this shape:",
-    '{"notes":[{"text":"Flyers out","day":"wed","time":"08:00","who":"Bo"}]}',
+    '{"notes":[{"text":"Flyers out","date":"2026-11-25","time":"08:00","who":"Bo"}]}',
     "",
     "Rules:",
     "- One note for each task, event, deadline or decision someone has to act on. One message can hold several tasks: give each its own note. Leave out greetings, small talk, thanks, jokes, reactions and questions that were answered. When the chat changes its mind (a new day, a new time, someone else), keep only the final version. When someone asks for something and another person takes it on (\u201ccan someone call the printer?\u201d, \u201cI'll call them tomorrow\u201d), that is one note: the task, with the person who took it and the day and time they gave. No duplicates.",
     '- "text": what to do, short like a sticky note (at most 8 words, or 12 Chinese characters), in the words of the message it comes from, and clear on its own: \u201cCall the printer\u201d, not \u201cCall them\u201d. Never translate: a Chinese message gives a Chinese note even when the rest of the chat is English, and the other way round. Leave the day, time and person out of it.',
-    `- "day": the weekday it happens or is due: "mon", "tue", "wed", "thu", "fri", "sat" or "sun"; null if the chat gives none. ${when} Turn words like "tomorrow", "this Friday", "明天", "后天", "下周三" and dates like "11/25" into the weekday they fall on.`,
+    `- "date": the day it happens or is due, as "YYYY-MM-DD"; null if the chat gives none. Today is ${weekdayOf(day)} ${day}.${week} Work dates out from when the chat was written, using this calendar:`,
+    calendarFrom(day),
+    '  "Today"/"今天" is today, "tomorrow"/"明天" the day after, "后天" the day after that. "Next week"/"下周" with a weekday is that day in next week; "下周" alone is next week\'s Monday. A weekday on its own ("Friday", "周五") is the next one from today on, today included. A date like "11/25" or "25号" is that date. A task the chat moves to another day keeps only its new date.',
     '- "time": the clock time, 24-hour "HH:MM" ("下午4点" is "16:00", "8 am" is "08:00"); null if none.',
     '- "who": the person who will do it, written as in the chat, when the chat says so; otherwise null.',
     `- At most ${PLAN_MAX_NOTES} notes, in the order they happen.`,
     "",
     'For example, the message "小李：周五上午10点开会，我来订会议室" holds two notes:',
-    '{"text":"开会","day":"fri","time":"10:00","who":null} and {"text":"订会议室","day":null,"time":null,"who":"小李"}.',
+    '{"text":"开会","date":"<the coming Friday>","time":"10:00","who":null} and {"text":"订会议室","date":null,"time":null,"who":"小李"}.',
     "Only notes from the chat below go in your answer.",
   ].join("\n");
   // Qwen 3 thinks before it answers: a few seconds more, and it is what catches
@@ -113,11 +127,30 @@ function cleanTime(v: unknown): number | null {
 
 const oneLine = (s: string) => s.replace(/\s+/g, " ").trim();
 
+/** A date the model gave, YYYY-MM-DD, kept only if it is a real date within a year or so of today. */
+function cleanDate(v: unknown, today: string): string | null | undefined {
+  if (typeof v !== "string") return undefined;
+  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(v.trim());
+  if (!m) return undefined;
+  const iso = `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
+  const t = Date.parse(`${iso}T00:00:00Z`);
+  if (Number.isNaN(t) || new Date(t).toISOString().slice(0, 10) !== iso) return undefined;
+  if (ISO.test(today) && Math.abs(t - Date.parse(`${today}T00:00:00Z`)) > 400 * 86_400_000) return undefined;
+  return iso;
+}
+
+/** The first date on or after today that falls on a weekday (0 = Monday), or null. */
+function nextWeekday(day: number | null, today: string): string | null {
+  if (day === null) return null;
+  const now = (new Date(`${today}T00:00:00Z`).getUTCDay() + 6) % 7;
+  return plusDays(today, (day - now + 7) % 7);
+}
+
 /**
  * The notes in a model's answer, checked and trimmed: null when the answer
  * isn't the JSON asked for, [] when it is but holds no notes.
  */
-export function readPlan(raw: unknown): PlanNote[] | null {
+export function readPlan(raw: unknown, today = ""): PlanNote[] | null {
   const answer = answerText(raw);
   const data = typeof answer === "string" ? parseJson(answer) : answer;
   if (!data || typeof data !== "object") return null;
@@ -133,14 +166,14 @@ export function readPlan(raw: unknown): PlanNote[] | null {
     const said = typeof o.text === "string" ? oneLine(o.text).slice(0, 140) : "";
     const text = said.replace(/^[a-z]/, (c) => c.toUpperCase());
     if (!text) continue;
-    const day = cleanDay(o.day);
+    const date = cleanDate(o.date, today) ?? (ISO.test(today) ? nextWeekday(cleanDay(o.day ?? o.weekday), today) : null);
     const time = cleanTime(o.time);
     const whoRaw = typeof o.who === "string" ? oneLine(o.who).replace(/^@/, "").slice(0, 32) : "";
     const who = whoRaw && !NOBODY.test(whoRaw) ? whoRaw : null;
-    const key = `${text.toLowerCase()}|${day}|${time}`;
+    const key = `${text.toLowerCase()}|${date}|${time}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ text, day, time, who });
+    out.push({ text, date, time, who });
   }
   return out;
 }
@@ -163,8 +196,35 @@ const CHATTER =
   /^(?:ok(?:ay)?|k|yes|yep|yeah|no|nope|sure|cool|nice|great|done|thanks?|thank you|thx|ty|lol|haha+|hah|hh+|good|got it|noted|on it|\+1|好的?|好滴|好嘞|嗯+|恩+|收到|可以|行|没问题|谢谢|感谢|辛苦了?|哈+|呵呵|对|是的?|ok👌)[\s!！.。~～,，?？]*$/i;
 const ONLY_SYMBOLS = /^[\p{P}\p{S}\p{Emoji_Presentation}\s]+$/u;
 
+const ZH_DAY: Record<string, number> = { 一: 0, 二: 1, 三: 2, 四: 3, 五: 4, 六: 5, 日: 6, 天: 6 };
+const EN_DAY = /\b(mon|tue|wed|thu|fri|sat|sun)[a-z]*\b/i;
+
+/**
+ * A date that words like "today", "明天", "下周三" or "next Fri" pin down,
+ * counted from today; null when the line names none (a plain "Wed" stays a
+ * weekday of the board's week, as on any note).
+ */
+export function relativeDate(line: string, today: string): string | null {
+  if (!ISO.test(today)) return null;
+  const now = (new Date(`${today}T00:00:00Z`).getUTCDay() + 6) % 7;
+  const monday = plusDays(today, -now);
+  if (/大后天/.test(line)) return plusDays(today, 3);
+  if (/后天|day after tomorrow/i.test(line)) return plusDays(today, 2);
+  if (/明天|明早|明晚|\btomorrow\b|\btmrw?\b/i.test(line)) return plusDays(today, 1);
+  if (/今天|今早|今晚|\btoday\b|\btonight\b/i.test(line)) return today;
+  const zh = /(下下|下|这|本)(?:个)?(?:周|星期|礼拜)([一二三四五六日天])/.exec(line);
+  if (zh) return plusDays(monday, (zh[1] === "下下" ? 14 : zh[1] === "下" ? 7 : 0) + ZH_DAY[zh[2]]);
+  const en = /\b(next|this)\s+(mon|tue|wed|thu|fri|sat|sun)[a-z]*\b/i.exec(line);
+  if (en) {
+    const d = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"].indexOf(en[2].toLowerCase());
+    return plusDays(monday, (en[1].toLowerCase() === "next" ? 7 : 0) + d);
+  }
+  if (/下周|\bnext week\b/i.test(line) && !EN_DAY.test(line)) return plusDays(monday, 7);
+  return null;
+}
+
 /** One note per line that says something, with chat names and timestamps taken off. */
-export function linesToNotes(text: string, max = 30): PlanNote[] {
+export function linesToNotes(text: string, max = 30, today = ""): PlanNote[] {
   const out: PlanNote[] = [];
   const seen = new Set<string>();
   for (let line of text.split(/\r?\n/)) {
@@ -175,7 +235,7 @@ export function linesToNotes(text: string, max = 30): PlanNote[] {
     const key = line.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ text: line.slice(0, 400), day: null, time: null, who: null });
+    out.push({ text: line.slice(0, 400), date: relativeDate(line, today), time: null, who: null });
     if (out.length >= max) break;
   }
   return out;

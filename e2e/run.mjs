@@ -13,9 +13,12 @@
 // password asks everyone but the owner, wrong guesses are slowed down; new
 // links shut the old ones out; clearing can be undone; a deleted board is
 // gone for everyone; with a team password nobody else can start boards; the
-// security headers are there. No page errors anywhere.
+// security headers are there. A chat becomes a plan and the week a calendar;
+// notes with dates of their own go to their own weeks, whose a note is shows
+// as a tag, and the export, picture and calendar can be just one person's.
+// No page errors anywhere.
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium, devices } from "playwright";
@@ -575,7 +578,7 @@ try {
     const init = await rs.next(["init"]);
     rs.send({ t: "plan", text: "Ana: flyers out on Wednesday at 8\nBo: 👍", today: "2026-11-19" });
     const answer = await rs.next(["plan"], 70_000);
-    if (process.env.BASE_URL) check(answer?.ok === true && answer.notes.some((n) => n.day === 2), `the room answers with notes and their days (${JSON.stringify(answer?.notes ?? answer)})`);
+    if (process.env.BASE_URL) check(answer?.ok === true && answer.notes.some((n) => n.date === "2026-11-25"), `the room answers with notes and their dates (the Wednesday after Thursday 19th) (${JSON.stringify(answer?.notes ?? answer)})`);
     else check(answer?.ok === false && answer.why === "off", "the room says when Workers AI isn’t there");
     const rv = await rawSession(made.id, { key: init.access.view });
     const vinit = await rv.next(["init"]);
@@ -609,6 +612,72 @@ try {
     await ro.next(["done"]);
     check((await api(feedUrl(fresh))).status === 410, "and a deleted board’s calendar says it’s gone");
     for (const x of [rs, rv, ro]) x.close();
+  }
+
+  // Dates of their own: today's note stays in this week, next week's gets a
+  // week of its own; whose it is is a tag; the export can be just mine.
+  {
+    const iso = (d) => d.toISOString().slice(0, 10);
+    const plus = (day, n) => {
+      const d = new Date(`${day}T00:00:00Z`);
+      d.setUTCDate(d.getUTCDate() + n);
+      return iso(d);
+    };
+    const today = iso(new Date());
+    const monday = plus(today, -((new Date(`${today}T00:00:00Z`).getUTCDay() + 6) % 7));
+    const nextWeek = plus(today, 7);
+    const res = await fetch(`${base}/api/boards`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ template: "blank", today, ...(TEAM ? { password: TEAM } : {}) }) });
+    const made = await res.json();
+    const rs = await rawSession(made.id, { key: made.edit });
+    const init = await rs.next(["init"]);
+    check(init.meta.weekOf === monday, `a new blank board is this week’s (${init.meta.weekOf})`);
+    const note = (id, text, x, more) => ({ op: "put", item: { id, type: "note", x, y: 0, rot: 0, z: 1, by: "Fen", color: "#FFE38A", text, ...more } });
+    rs.send({
+      t: "ops",
+      tx: 1,
+      ops: [
+        note("dated-today", "Call the printer", 0, { date: today, who: "Fen" }),
+        note("dated-next", "Flyers out", 260, { date: nextWeek, time: 480, who: "Gil" }),
+        note("dated-sunday", "Count the till", 520, { day: 6 }),
+      ],
+    });
+    check(!(await rs.next(["ack"]))?.rejected, "notes take a date and a name of their own");
+    const P = await person(browser, "Fen", "#A8E6B8");
+    await P.goto(`${base}/b/${made.id}#k=${made.edit}`);
+    await P.waitForFunction(() => document.querySelectorAll(".item.note").length === 3, null, { timeout: 6000 });
+    await P.click(".tidy-pill");
+    await settle(P.waitForFunction(() => document.querySelectorAll(".item.week").length === 2, null, { timeout: 6000 }), "a note dated next week gets a week of its own on the tidy");
+    await wait(1200);
+    const top = (id) => P.$eval(`.item[data-id="${id}"] .shape`, (e) => e.getBoundingClientRect().top);
+    check((await top("dated-next")) > (await top("dated-today")) + 40 && Math.abs((await top("dated-sunday")) - (await top("dated-today"))) < 4, "and sits a week down, while today’s and Sunday’s stay in this week");
+    const tag = await P.$eval('.item[data-id="dated-today"] .who-tag', (e) => e.textContent);
+    const words = await P.$eval('.item[data-id="dated-today"] .words', (e) => e.textContent);
+    check(tag === "FFen" && !words.includes("@"), `whose it is shows as a tag, not words in the note (${tag})`);
+    const stamp = await P.$eval('.item[data-id="dated-next"] .day-tag', (e) => e.textContent);
+    check(/^[A-Z]{3} \d{1,2} [A-Z]{3} · 08:00$/.test(stamp), `next week’s note says its date (${stamp})`);
+    await P.click(".topbar .export");
+    await P.waitForSelector(".export-dialog.open");
+    const all = await P.$eval(".export-dialog pre", (e) => e.textContent);
+    check(all.includes("Call the printer · Fen") && all.includes("08:00 Flyers out · Gil") && all.indexOf("Call the printer") < all.indexOf("Flyers out"), "the export goes by date, with whose each note is");
+    await P.click(".export-dialog .seg [data-who='me']");
+    const mine = await P.$eval(".export-dialog pre", (e) => e.textContent);
+    const feedMine = await P.$eval(".export-dialog [data-cal='copy']", (e) => e.dataset.url);
+    check(mine.includes("Call the printer") && !mine.includes("Flyers out") && !mine.includes("Count the till"), "“Just Fen’s” keeps only Fen’s notes");
+    check(/[?&]who=Fen(&|$)/.test(feedMine), "and the calendar link follows it");
+    const [dl] = await Promise.all([P.waitForEvent("download", { timeout: 10_000 }), P.click(".export-dialog [data-x='png']")]);
+    const size = statSync(await dl.path()).size;
+    check(/\.png$/.test(dl.suggestedFilename()) && size > 20_000, `the week comes out as a picture (${dl.suggestedFilename()}, ${Math.round(size / 1024)} KB)`);
+    await P.keyboard.press("Escape");
+    const feed = (who) => api(`/api/boards/${made.id}/cal/${init.access.cal}.ics${who ? `?who=${encodeURIComponent(who)}` : ""}`).then((r) => r.text());
+    const everyone = await feed("");
+    const gil = await feed("Gil");
+    check(everyone.includes(`DTSTART:${nextWeek.replaceAll("-", "")}T080000`) && everyone.includes("SUMMARY:Flyers out · Gil"), "the calendar puts next week’s note on its own date");
+    check(gil.includes("SUMMARY:Flyers out") && !gil.includes("Call the printer") && gil.includes("X-WR-CALNAME:") && /X-WR-CALNAME:.*Gil/.test(gil), "and a calendar of just Gil’s notes has only Gil’s");
+    const ro = await rawSession(made.id, { owner: made.owner });
+    await ro.next(["init"]);
+    ro.send({ t: "admin", act: "delete" });
+    await ro.next(["done"]);
+    for (const x of [rs, ro]) x.close();
   }
 
   // One address can't start boards without end (only here: it would use up the quota of a real deployment).

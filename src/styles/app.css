@@ -256,6 +256,10 @@ a.btn {
   white-space: pre;
   pointer-events: none;
 }
+/* Under a date stamp, the words start below it. */
+.note .words.stamped {
+  top: 34px;
+}
 .day-word {
   position: relative;
 }
@@ -304,6 +308,50 @@ a.btn {
   from {
     transform: translateY(-20px) scale(0.4);
   }
+}
+/* Whose note it is: a small tag like the name flag on a cursor. */
+.note .who-tag {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  max-width: 150px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px 0 3px;
+  border: 0;
+  border-radius: 13px;
+  background: rgba(23, 24, 28, 0.86);
+  color: #ecebe6;
+  font: 600 12.5px/1 var(--sans);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.note .fold ~ .who-tag {
+  right: 30px;
+}
+.note .who-tag i {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--w);
+  color: var(--ink);
+  font: 700 11px/20px var(--sans);
+  font-style: normal;
+  text-align: center;
+}
+.note .who-tag span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.board-app[data-tool="select"] .note .who-tag {
+  pointer-events: auto;
+  cursor: pointer;
+}
+.note.editing .who-tag {
+  visibility: hidden;
 }
 .note .day-tag {
   position: absolute;
@@ -636,6 +684,10 @@ a.btn {
   background: #4a4d59;
   transform-origin: left;
 }
+/* A week other than the board's own: the same grid, a quieter rule. */
+.week.other-week .day-head i {
+  background: #3a3c46;
+}
 .day-head.typing span {
   animation: type 0.24s steps(4, end) var(--at) both;
 }
@@ -953,12 +1005,75 @@ a.btn {
 .when-top > b {
   font: 600 15px var(--display);
 }
-.when-week {
+.when-nav {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
+  gap: 2px;
+}
+.when-nav span {
+  min-width: 118px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font: 600 12.5px/1.25 var(--sans);
+  color: var(--chalk);
+}
+.when-nav small {
+  font: 600 10px/1.2 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--muted);
+}
+.menu .when-nav button {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  justify-content: center;
+}
+.when-nav svg {
+  width: 18px;
+  height: 18px;
+}
+.when-who {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--bar-line);
+}
+.when-who > b {
+  font: 600 15px var(--display);
+}
+.who-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.menu .who-chips button {
+  height: 30px;
+  gap: 6px;
+  padding: 0 10px 0 4px;
+  border: 1px solid var(--bar-line);
+  border-radius: 15px;
+  font-size: 13px;
+}
+.menu .who-chips button:last-child {
+  padding-left: 10px;
+}
+.who-chips i {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--w);
+  color: var(--ink);
+  font: 700 11.5px/22px var(--sans);
+  font-style: normal;
+  text-align: center;
+}
+.menu .who-chips button.on {
+  background: var(--chalk);
+  border-color: var(--chalk);
+  color: var(--ink);
 }
 .when-menu input {
   height: 30px;
@@ -2569,7 +2684,7 @@ a.btn {
 }
 .plan-list label {
   display: grid;
-  grid-template-columns: 18px 112px 1fr auto;
+  grid-template-columns: 18px 140px 1fr auto;
   align-items: center;
   gap: 10px;
   padding: 8px 10px;
@@ -2592,12 +2707,27 @@ a.btn {
   overflow-wrap: anywhere;
 }
 .plan-list .who {
-  padding: 2px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px 0 3px;
   border-radius: 999px;
   background: #33353f;
-  color: #cfd1d8;
+  color: #e4e5ea;
   font-size: 12px;
+  font-weight: 600;
   white-space: nowrap;
+}
+.plan-list .who i {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--w);
+  color: var(--ink);
+  font: 700 10px/18px var(--sans);
+  font-style: normal;
+  text-align: center;
 }
 .plan-list input:not(:checked) ~ span {
   opacity: 0.4;
@@ -2683,4 +2813,66 @@ a.btn {
 .cal-row .btn svg {
   width: 16px;
   height: 16px;
+}
+
+/* --------------------------------------------- whose notes: everyone / mine */
+.seg {
+  display: inline-flex;
+  gap: 2px;
+  margin: 0 0 14px;
+  padding: 3px;
+  border-radius: 11px;
+  background: var(--raise);
+}
+.seg button {
+  height: 32px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font: 600 13.5px var(--sans);
+  cursor: pointer;
+}
+.seg button.on {
+  background: var(--chalk);
+  color: var(--ink);
+}
+.seg button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.export-dialog .btn svg {
+  width: 17px;
+  height: 17px;
+}
+.export-dialog .field .hint {
+  margin-top: -4px;
+  font-size: 12.5px;
+  color: var(--muted);
+  opacity: 0.8;
+}
+.export-dialog .downloads {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 14px;
+}
+.export-dialog .downloads .btn {
+  justify-content: center;
+  gap: 7px;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+.export-dialog .actions {
+  margin-top: 14px;
+}
+@media (max-width: 420px) {
+  .export-dialog .downloads .btn {
+    font-size: 13px;
+    padding: 0 6px;
+  }
+  .export-dialog .downloads .btn svg {
+    display: none;
+  }
 }

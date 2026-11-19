@@ -85,7 +85,7 @@ export class Demo {
     const sat = this.seed.get("n-double") as NoteItem;
     items.push({ ...sat, id: "n-double-sun", by: "Ana", text: sat.text.replace(/Sat$/, "Sun"), x: sat.x + 100, y: sat.y - 230, rot: 0 });
     b.commit(items.map((item) => ({ op: "put", item }) as Op), { history: false });
-    const plan = planTidy(b.state.list(), null, () => b.newItemId());
+    const plan = planTidy(b.state.list(), null, () => b.newItemId(), b.state.meta.weekOf);
     if (plan) {
       b.commit(plan.ops, { history: false });
       b.cam.set(b.cam.fitView(plan.box, b.insets(), 1));

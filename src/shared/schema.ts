@@ -20,6 +20,9 @@ export const PHOTO_ARTS: PhotoArt[] = ["loaf", "croissant", "shop", "cup", "tray
 export const REACTIONS: ReactionKind[] = ["heart", "star", "bang", "clap"];
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
+const ISO_DAY = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+/** A date (YYYY-MM-DD) or "" for none. */
+const isoOrNone = (v: unknown): string | undefined => (v === "" || (typeof v === "string" && ISO_DAY.test(v)) ? v : undefined);
 const ID = /^[A-Za-z0-9_-]{1,40}$/;
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -67,12 +70,20 @@ function votes(v: unknown): Record<string, string> | undefined {
  * any of them except id and type; a put must give the required ones.
  */
 const FIELDS: Record<Item["type"], Record<string, (v: unknown) => unknown>> = {
-  note: { text: (v) => str(v, LIMITS.text), color, votes, day: (v) => int(v, -1, 7), time: (v) => int(v, -2, 1439) },
+  note: {
+    text: (v) => str(v, LIMITS.text),
+    color,
+    votes,
+    day: (v) => int(v, -1, 7),
+    time: (v) => int(v, -2, 1439),
+    date: isoOrNone,
+    who: (v) => (typeof v === "string" ? str(v, LIMITS.name)!.replace(/\s+/g, " ").trim() : undefined),
+  },
   label: { text: (v) => str(v, LIMITS.label), color },
   check: { title: (v) => str(v, LIMITS.row), rows, color },
   photo: { art: (v) => (PHOTO_ARTS.includes(v as PhotoArt) ? v : undefined), caption: (v) => str(v, LIMITS.row) },
   stroke: { color, width: (v) => num(v, 1, 40), pts: points },
-  week: { cols: (v) => (v === 7 || v === 8 ? v : undefined) },
+  week: { cols: (v) => (v === 7 || v === 8 ? v : undefined), of: isoOrNone },
 };
 const COMMON: Record<string, (v: unknown) => unknown> = {
   x: coord,
@@ -197,7 +208,8 @@ export function cleanEffect(raw: unknown): Effect | undefined {
     const d = num(v, 0, 3);
     if (isId(k) && d !== undefined) delays[k] = d;
   }
-  return { kind: "tidy", delays, week: raw.week, count: num(raw.count, 0, LIMITS.items) ?? 0 };
+  const weeks = Array.isArray(raw.weeks) ? raw.weeks.filter(isId).slice(0, 60) : undefined;
+  return { kind: "tidy", delays, week: raw.week, ...(weeks?.length ? { weeks } : {}), count: num(raw.count, 0, LIMITS.items) ?? 0 };
 }
 
 export const cleanName = (v: unknown) => (str(v, LIMITS.name) ?? "").trim();

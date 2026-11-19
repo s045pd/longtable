@@ -84,6 +84,24 @@ export function dateOf(weekOf: string, day: number): Date {
   return new Date(y, m - 1, d + day);
 }
 
+/** A YYYY-MM-DD date as a local Date at midnight. */
+export function parseIso(iso: string): Date {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+/** YYYY-MM-DD, n days later (or earlier). */
+export const addDays = (iso: string, n: number) => {
+  const d = parseIso(iso);
+  d.setDate(d.getDate() + n);
+  return isoDate(d);
+};
+
+/** 0 = Monday … 6 = Sunday, for a YYYY-MM-DD date. */
+export const weekdayOf = (iso: string) => (parseIso(iso).getDay() + 6) % 7;
+
+export const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
 /** The Monday of the week a date falls in, as YYYY-MM-DD. */
 export function mondayOf(iso: string): string {
   const [y, m, d] = iso.split("-").map(Number);
@@ -104,15 +122,35 @@ interface Whenable {
   text: string;
   day?: number;
   time?: number;
+  date?: string;
 }
 
-export const dayPicked = (n: Whenable) => n.day !== undefined && n.day >= 0;
+/** True when the note has a date of its own (picked by hand or read from a chat), which wins over everything else. */
+export const datePicked = (n: Whenable) => typeof n.date === "string" && ISO_DATE.test(n.date);
+export const dayPicked = (n: Whenable) => datePicked(n) || (n.day !== undefined && n.day >= 0);
 export const timePicked = (n: Whenable) => n.time !== undefined && n.time !== FROM_WORDS;
 
-/** The day a note is for (0 = Monday … 6 = Sunday), or null for any day. */
+/** The weekday a note is for (0 = Monday … 6 = Sunday), or null for any day. */
 export function noteDay(n: Whenable): number | null {
+  if (datePicked(n)) return weekdayOf(n.date!);
   if (dayPicked(n)) return n.day! >= ANY ? null : n.day!;
   return findDay(n.text)?.day ?? null;
+}
+
+/**
+ * The Monday of the week a note belongs in: its own date's week, or else the
+ * board's week (a weekday named in the words, picked in the board's week, or
+ * no day at all). "" when the board has no week and the note no date.
+ */
+export function noteWeek(n: Whenable, weekOf: string): string {
+  return datePicked(n) ? mondayOf(n.date!) : weekOf;
+}
+
+/** The date a note is for, YYYY-MM-DD, or null for any day (or a weekday on a board with no week). */
+export function noteDate(n: Whenable, weekOf: string): string | null {
+  if (datePicked(n)) return n.date!;
+  const day = noteDay(n);
+  return day === null || !weekOf ? null : isoDate(dateOf(weekOf, day));
 }
 
 /** The time a note is at, in minutes after midnight, or null. */
@@ -121,10 +159,32 @@ export function noteTime(n: Whenable): number | null {
   return findTime(n.text);
 }
 
-/** "SAT 28" (or "SAT" without a week), "ANY DAY", plus " · 10:00" when timed. */
+const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+
+/** "SAT 28" ("SAT" without a week; "WED 3 DEC" outside the board's week), "ANY DAY", plus " · 10:00" when timed. */
 export function whenLabel(n: Whenable, weekOf: string): string {
   const day = noteDay(n);
   const time = noteTime(n);
-  const d = day === null ? ANY_DAY : weekOf ? `${DAY_HEADERS[day]} ${dateOf(weekOf, day).getDate()}` : DAY_HEADERS[day];
+  const date = noteDate(n, weekOf);
+  let d = day === null ? ANY_DAY : DAY_HEADERS[day];
+  if (date) {
+    const at = parseIso(date);
+    d += ` ${at.getDate()}`;
+    if (mondayOf(date) !== weekOf) d += ` ${MONTHS[at.getMonth()]}`;
+  }
   return time === null ? d : `${d} · ${formatTime(time)}`;
+}
+
+/** The person a note is for, if it names one. */
+export const noteWho = (n: { who?: string }) => (n.who ?? "").trim();
+
+/** True when a note is for this person: its tag names them, or its words @-mention them. */
+export function isFor(n: { text: string; who?: string }, name: string): boolean {
+  const me = name.trim().toLowerCase();
+  if (!me) return false;
+  if (noteWho(n).toLowerCase() === me) return true;
+  const at = n.text.toLowerCase().indexOf(`@${me}`);
+  if (at < 0) return false;
+  const after = n.text.charAt(at + me.length + 1);
+  return !after || !/[\p{L}\p{N}_]/u.test(after);
 }

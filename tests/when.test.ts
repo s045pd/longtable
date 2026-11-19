@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ANY, FROM_WORDS, NO_TIME, mondayOf, noteDay, noteTime, whenLabel } from "../src/shared/days";
+import { ANY, FROM_WORDS, NO_TIME, isFor, mondayOf, noteDate, noteDay, noteTime, noteWeek, whenLabel } from "../src/shared/days";
 import { toMarkdown, weekEntries } from "../src/shared/exporter";
 import { PITCH_X, PITCH_Y } from "../src/shared/geometry";
 import { cleanItem, cleanOp } from "../src/shared/schema";
@@ -138,5 +138,83 @@ describe("dropping notes on the week", () => {
     const { s, loose } = tidied();
     s.apply({ op: "patch", id: loose.id, set: { x: 5000, y: 5000 } });
     expect(planDrop(s.list(), [loose.id], [], id)).toEqual([]);
+  });
+});
+
+describe("a date of its own", () => {
+  const weekOf = META.weekOf;
+  const weeks = (s: BoardState) => s.list().filter((it): it is WeekItem => it.type === "week").sort((a, b) => a.y - b.y);
+
+  it("wins over the board's week, and reads as that date", () => {
+    const n = note("Taste test Sat", 0, 0, { date: "2026-11-19", time: 960 });
+    expect(noteDay(n)).toBe(3);
+    expect(noteDate(n, weekOf)).toBe("2026-11-19");
+    expect(noteWeek(n, weekOf)).toBe("2026-11-16");
+    expect(whenLabel(n, weekOf)).toBe("THU 19 NOV · 16:00");
+    expect(whenLabel(note("Flyers Wed"), weekOf)).toBe("WED 25");
+    expect(noteDate(note("Flyers Wed", 0, 0, { date: "" }), weekOf)).toBe("2026-11-25");
+  });
+
+  it("gives each week its own band, earlier weeks above", () => {
+    const today = note("Call the printer", 0, 0, { date: "2026-11-19" });
+    const wed = note("Flyers out Wed", 300, 0);
+    const later = note("Review", 600, 0, { date: "2026-12-03", time: 600 });
+    const anyDay = note("Fix the sign", 900, 0);
+    const plan = planTidy([today, wed, later, anyDay], null, id, weekOf)!;
+    expect(plan.fx.weeks).toHaveLength(3);
+    const s = run([today, wed, later, anyDay], plan.ops);
+    const [w1, w2, w3] = weeks(s);
+    expect([w1.of, w2.of ?? "", w3.of]).toEqual(["2026-11-16", "", "2026-11-30"]);
+    expect([w1.cols, w2.cols, w3.cols]).toEqual([7, 8, 7]);
+    const at = (n: NoteItem) => s.items.get(n.id)!;
+    expect(at(today).y).toBe(w1.y);
+    expect(Math.round((at(today).x - w1.x) / PITCH_X)).toBe(3);
+    expect(at(wed).y).toBe(w2.y);
+    expect(Math.round((at(anyDay).x - w2.x) / PITCH_X)).toBe(7);
+    expect(at(later).y).toBe(w3.y);
+    expect(Math.round((at(later).x - w3.x) / PITCH_X)).toBe(3);
+    expect(w2.y - w1.y).toBeGreaterThan(200 + 132 + 20);
+  });
+
+  it("drops a week that is left empty, and keeps the rest where they are", () => {
+    const today = note("Call the printer", 0, 0, { date: "2026-11-19" });
+    const wed = note("Flyers out Wed", 300, 0);
+    const s = run([today, wed], planTidy([today, wed], null, id, weekOf)!.ops);
+    const before = weeks(s);
+    s.apply({ op: "patch", id: today.id, set: { date: "", day: 4 } });
+    const again = planTidy(s.list(), null, id, weekOf)!;
+    expect(again.ops.filter((op) => op.op === "del").map((op) => (op as { id: string }).id)).toEqual([before[0].id]);
+    for (const op of again.ops) s.apply(op);
+    expect(weeks(s)).toHaveLength(1);
+    expect(weeks(s)[0].id).toBe(before[1].id);
+  });
+
+  it("dropping into another week's column gives the note that date", () => {
+    const today = note("Call the printer", 0, 0, { date: "2026-11-19" });
+    const wed = note("Flyers out Wed", 300, 0);
+    const fri = note("Sign Fri", 600, 0);
+    const s = run([today, wed, fri], planTidy([today, wed, fri], null, id, weekOf)!.ops);
+    s.apply({ op: "patch", id: wed.id, set: { x: weeks(s)[0].x + PITCH_X * 5 + 10, y: weeks(s)[0].y + 20 } });
+    for (const op of planDrop(s.list(), [wed.id], [wed.id], id, weekOf)) s.apply(op);
+    expect((s.items.get(wed.id) as NoteItem).date).toBe("2026-11-21");
+    const boardWeek = weeks(s)[1];
+    s.apply({ op: "patch", id: today.id, set: { x: boardWeek.x + PITCH_X, y: boardWeek.y + 10 } });
+    for (const op of planDrop(s.list(), [today.id], [today.id], id, weekOf)) s.apply(op);
+    expect(s.items.get(today.id)).toMatchObject({ day: 1, date: "" });
+  });
+
+  it("survives the checks, and a name tag too", () => {
+    const n = cleanItem({ id: "n1", type: "note", x: 0, y: 0, text: "x", date: "2026-11-19", who: "  Ana   Lee ", color: "#FFB38A" });
+    expect(n).toMatchObject({ date: "2026-11-19", who: "Ana Lee" });
+    expect(cleanItem({ id: "n2", type: "note", x: 0, y: 0, text: "x", date: "2026-13-40" })).not.toHaveProperty("date");
+    expect(cleanOp({ op: "patch", id: "n1", set: { date: "", who: "" } }, () => "note")).toEqual({ op: "patch", id: "n1", set: { date: "", who: "" } });
+    expect(cleanItem({ id: "w1", type: "week", x: 0, y: 0, cols: 7, of: "2026-11-16" })).toMatchObject({ of: "2026-11-16" });
+  });
+
+  it("knows whose a note is", () => {
+    expect(isFor({ text: "Flyers", who: "Ana" }, "ana")).toBe(true);
+    expect(isFor({ text: "Ask @Ana about it" }, "Ana")).toBe(true);
+    expect(isFor({ text: "Ask @Anabel about it" }, "Ana")).toBe(false);
+    expect(isFor({ text: "Flyers", who: "Bo" }, "Ana")).toBe(false);
   });
 });

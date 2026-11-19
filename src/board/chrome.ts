@@ -2,7 +2,7 @@
 // bar (whose board, who is here, share, export, zoom), the toolbar, the
 // selection bar, the Tidy up button, toasts and the few dialogs.
 import { PALETTE } from "../shared/colors";
-import { ANY, DAY_HEADERS, DAY_NAMES, FROM_WORDS, NO_TIME, dateOf, dayPicked, findDay, findTime, formatTime, mondayOf, nextMonday, noteDay, noteTime, timePicked } from "../shared/days";
+import { ANY, DAY_HEADERS, DAY_NAMES, FROM_WORDS, NO_TIME, addDays, dateOf, dayPicked, findDay, formatTime, mondayOf, nextMonday, noteDate, noteDay, noteTime, noteWeek, noteWho, parseIso, timePicked, whenLabel } from "../shared/days";
 import { boardTitle, fileStem, toCsv, toIcs, toMarkdown } from "../shared/exporter";
 import { PLAN_MAX_CHARS, linesToNotes, localIso } from "../shared/plan";
 import { REACTIONS } from "../shared/schema";
@@ -11,6 +11,8 @@ import { escapeHtml, type Board, type Tool } from "./app";
 import { boardLink, forgetBoard, recentBoards } from "./identity";
 import type { LinkStatus } from "./net";
 import { reactionIcon } from "./people";
+import { nameColor } from "./views";
+import { weekPicture } from "./picture";
 
 const ICON = {
   select: '<path d="M6 3l0 16 4.5-4.2 3 6.6 3-1.4-3-6.4 6-.2z"/>',
@@ -42,6 +44,10 @@ const ICON = {
   device: '<rect x="6" y="3" width="12" height="18" rx="2.5" fill="none"/><path d="M10.5 18h3" fill="none"/>',
   chat: '<path d="M4.5 6.5h10a2 2 0 012 2v6a2 2 0 01-2 2H9.5l-3.5 3v-3H4.5a2 2 0 01-2-2v-6a2 2 0 012-2z" fill="none"/><path d="M19 2.2l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z" fill="currentColor" stroke="none"/><path d="M6 10.5h7M6 13h4.5" fill="none"/>',
   cal: '<rect x="4" y="5" width="16" height="15" rx="2" fill="none"/><path d="M4 10h16M9 3v4M15 3v4" fill="none"/><path d="M9 15l2 2 4-4" fill="none"/>',
+  left: '<path d="M14.5 6l-6 6 6 6" fill="none"/>',
+  right: '<path d="M9.5 6l6 6-6 6" fill="none"/>',
+  sheet: '<rect x="4" y="5" width="16" height="14" rx="2" fill="none"/><path d="M4 10h16M4 14.5h16M10 5v14" fill="none"/>',
+  image: '<rect x="3.5" y="5" width="17" height="14" rx="2" fill="none"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17l5-4.5 3.5 3 3-2.5L20 17" fill="none"/>',
 };
 const icon = (name: keyof typeof ICON) => `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">${ICON[name]}</svg>`;
 
@@ -77,6 +83,8 @@ export class Chrome {
   private reactMenu: HTMLElement;
   private zoomMenu: HTMLElement;
   private whenMenu: HTMLElement;
+  /** The week the day picker shows (its Monday); null = the board's own. */
+  private whenWeek: string | null = null;
   private boardsMenu: HTMLElement;
   private sortedTimers: number[] = [];
   private avatarsShown = new Set<string>();
@@ -210,15 +218,21 @@ export class Chrome {
       this.closeMenus();
     });
     document.addEventListener("pointerdown", (e) => {
-      if (!(e.target as HTMLElement).closest(".menu, .react, .zoom, .day-tag, [data-act='day'], [data-demo='boards']")) this.closeMenus();
+      if (!(e.target as HTMLElement).closest(".menu, .react, .zoom, .day-tag, .who-tag, [data-act='day'], [data-demo='boards']")) this.closeMenus();
     });
     this.whenMenu.addEventListener("pointerdown", (e) => e.stopPropagation());
     this.whenMenu.addEventListener("click", (e) => {
       const b = (e.target as HTMLElement).closest<HTMLButtonElement>("button");
       if (!b) return;
-      if (b.dataset.day) board.setWhen({ day: Number(b.dataset.day) });
+      const weekOf = board.state.meta.weekOf;
+      if (b.dataset.day) {
+        const day = Number(b.dataset.day);
+        const week = this.whenWeek ?? weekOf;
+        board.setWhen(day === ANY ? { day: ANY, date: "" } : week === weekOf || !week ? { day, date: "" } : { date: addDays(week, day) });
+      } else if (b.dataset.nav) this.whenWeek = addDays(this.whenWeek ?? weekOf ?? mondayOf(localIso()), Number(b.dataset.nav) * 7);
+      else if (b.dataset.who !== undefined) board.setWhen({ who: b.dataset.who });
       else if (b.dataset.time === "none") board.setWhen({ time: NO_TIME });
-      else if (b.dataset.when === "words") board.setWhen({ day: FROM_WORDS, time: FROM_WORDS });
+      else if (b.dataset.when === "words") board.setWhen({ day: FROM_WORDS, time: FROM_WORDS, date: "" });
       else if (b.dataset.when === "done") return void this.closeMenus();
       this.renderWhen();
     });
@@ -232,9 +246,8 @@ export class Chrome {
         none?.classList.toggle("on", !m);
         none?.setAttribute("aria-pressed", String(!m));
         return;
-      } else if (input.name === "week" && /^\d{4}-\d{2}-\d{2}$/.test(input.value)) {
-        const weekOf = mondayOf(input.value);
-        if (weekOf !== board.state.meta.weekOf) board.setMeta({ weekOf });
+      } else if (input.name === "who") {
+        board.setWhen({ who: input.value.replace(/\s+/g, " ").trim().slice(0, 32) });
       }
       this.renderWhen();
     });
@@ -344,6 +357,8 @@ export class Chrome {
     }
     this.board.editor.commit();
     this.closeMenus();
+    const first = notes[0] as NoteItem;
+    this.whenWeek = noteWeek(first, this.board.state.meta.weekOf) || null;
     this.renderWhen();
     this.whenMenu.classList.add("open");
     const m = this.whenMenu.getBoundingClientRect();
@@ -363,8 +378,9 @@ export class Chrome {
     const b = this.board;
     const notes = b.selected().filter((it): it is NoteItem => it.type === "note");
     if (!notes.length) return this.closeMenus();
-    const weekOf = b.state.meta.weekOf || nextMonday();
-    const days = notes.map(noteDay);
+    const boardWeek = b.state.meta.weekOf;
+    const weekOf = this.whenWeek || boardWeek || nextMonday();
+    const days = notes.map((n) => (noteWeek(n, boardWeek) === weekOf || noteDay(n) === null ? noteDay(n) : -9));
     const day = days.every((d) => d === days[0]) ? days[0] : undefined;
     const times = notes.map(noteTime);
     const time = times.every((t) => t === times[0]) ? times[0] : undefined;
@@ -375,6 +391,21 @@ export class Chrome {
       const label = i === ANY ? "Any day" : `${DAY_NAMES[i]} ${dateOf(weekOf, i).getDate()}`;
       return `<button data-day="${i}" class="${on ? "on" : ""}${on && fromWords ? " auto" : ""}" aria-pressed="${on}" aria-label="${label}"><b>${i === ANY ? "ANY" : DAY_HEADERS[i]}</b><small>${i === ANY ? "day" : dateOf(weekOf, i).getDate()}</small></button>`;
     };
+    // Whose: everyone on the board now, and every name already on a note.
+    const whos = notes.map(noteWho);
+    const who = whos.every((w) => w === whos[0]) ? whos[0] : undefined;
+    const names = new Map<string, string>();
+    const addName = (n: string) => n.trim() && !names.has(n.trim().toLowerCase()) && names.set(n.trim().toLowerCase(), n.trim());
+    addName(b.me.name);
+    for (const p of b.people.all.values()) if (!p.view) addName(p.name);
+    for (const it of b.state.items.values()) if (it.type === "note" && it.who) addName(it.who);
+    if (who) addName(who);
+    const chip = (name: string) => {
+      const on = who !== undefined && who.toLowerCase() === name.toLowerCase();
+      return `<button data-who="${escapeHtml(name)}" class="${on ? "on" : ""}" aria-pressed="${on}"><i style="--w:${nameColor(name)}">${escapeHtml(name.charAt(0).toUpperCase())}</i>${escapeHtml(name)}</button>`;
+    };
+    const range = `${dateOf(weekOf, 0).getDate()} ${dateOf(weekOf, 0).toLocaleString("en-GB", { month: "short" })} – ${dateOf(weekOf, 6).getDate()} ${dateOf(weekOf, 6).toLocaleString("en-GB", { month: "short" })}`;
+    const weekName = weekOf === boardWeek ? "The board’s week" : weekOf === mondayOf(localIso()) ? "This week" : weekOf === addDays(mondayOf(localIso()), 7) ? "Next week" : weekOf < boardWeek ? "Earlier" : "Later";
     let hint = "";
     if (notes.length === 1) {
       const n = notes[0];
@@ -383,12 +414,13 @@ export class Chrome {
       else if (named) hint = `Read from “${escapeHtml(n.text.slice(named.index, named.index + named.length))}” on the note. Pick a day to change it.`;
       else hint = "The note names no day yet, so it goes under ANY DAY. Pick one.";
     } else hint = `${notes.length} notes selected: a day you pick applies to all of them.`;
-    const month = dateOf(weekOf, 0).toLocaleString("en-GB", { month: "short" });
     this.whenMenu.innerHTML =
-      `<div class="when-top"><b>Day</b><label class="when-week">Week of <input type="date" name="week" value="${weekOf}" aria-label="Week starting"></label></div>` +
-      `<div class="when-days" aria-label="Days of the week of ${dateOf(weekOf, 0).getDate()} ${month}">${[0, 1, 2, 3, 4, 5, 6, ANY].map(cell).join("")}</div>` +
+      `<div class="when-top"><b>Day</b><div class="when-nav"><button data-nav="-1" aria-label="Week before">${icon("left")}</button><span><small>${weekName}</small>${range}</span><button data-nav="1" aria-label="Week after">${icon("right")}</button></div></div>` +
+      `<div class="when-days" aria-label="Days from ${range}">${[0, 1, 2, 3, 4, 5, 6, ANY].map(cell).join("")}</div>` +
       `<div class="when-time"><label>Time <input type="time" name="time" step="300" value="${time !== undefined && time !== null ? formatTime(time) : ""}"></label>` +
       `<button data-time="none" class="${time === null ? "on" : ""}" aria-pressed="${time === null}">No time</button></div>` +
+      `<div class="when-who"><b>Who</b><div class="who-chips">${[...names.values()].map(chip).join("")}<button data-who="" class="${who === "" ? "on" : ""}" aria-pressed="${who === ""}">Nobody</button></div>` +
+      `<input name="who" placeholder="Someone else…" maxlength="32" aria-label="Someone else" autocomplete="off"></div>` +
       `<p class="when-hint">${hint}</p>` +
       `<div class="when-foot">${byHand ? `<button data-when="words">Read from the words again</button>` : "<span></span>"}<button data-when="done" class="done">Done</button></div>`;
   }
@@ -474,12 +506,16 @@ export class Chrome {
   }
 
   private dayButtonLabel(notes: NoteItem[]): string {
-    const days = notes.map(noteDay);
-    if (!days.every((d) => d === days[0])) return "Day";
-    const d = days[0];
-    if (d === null) return notes.some(dayPicked) ? "Any day" : "Day";
     const weekOf = this.board.state.meta.weekOf;
-    return weekOf ? `${DAY_HEADERS[d].charAt(0)}${DAY_HEADERS[d].slice(1).toLowerCase()} ${dateOf(weekOf, d).getDate()}` : DAY_NAMES[d];
+    const dates = notes.map((n) => noteDate(n, weekOf) ?? `d${noteDay(n)}`);
+    if (!dates.every((d) => d === dates[0])) return "Day";
+    const d = noteDay(notes[0]);
+    if (d === null) return notes.some(dayPicked) ? "Any day" : "Day";
+    const date = noteDate(notes[0], weekOf);
+    const name = `${DAY_HEADERS[d].charAt(0)}${DAY_HEADERS[d].slice(1).toLowerCase()}`;
+    if (!date) return DAY_NAMES[d];
+    const at = parseIso(date);
+    return `${name} ${at.getDate()}${mondayOf(date) === weekOf ? "" : ` ${at.toLocaleString("en-GB", { month: "short" })}`}`;
   }
 
   placeSelectionBar() {
@@ -1190,12 +1226,12 @@ export class Chrome {
       });
       card.querySelector("[data-close]")!.addEventListener("click", d.close);
       card.querySelector("[data-act='lines']")?.addEventListener("click", () => {
-        if (text.trim()) review(linesToNotes(text), null);
+        if (text.trim()) review(linesToNotes(text, 30, localIso()), null);
       });
       card.querySelector("form")!.addEventListener("submit", async (e) => {
         e.preventDefault();
         if (!text.trim()) return area.focus();
-        if (!live) return review(linesToNotes(text), null);
+        if (!live) return review(linesToNotes(text, 30, localIso()), null);
         const go = card.querySelector<HTMLButtonElement>("button[type=submit]")!;
         go.disabled = true;
         area.disabled = true;
@@ -1204,7 +1240,7 @@ export class Chrome {
         const r = await b.link.plan(text, localIso());
         if (!d.el.isConnected) return;
         if (r.ok) review(r.notes, null);
-        else review(linesToNotes(text), r.why, r.wait);
+        else review(linesToNotes(text, 30, localIso()), r.why, r.wait);
       });
       setTimeout(() => area.focus(), 60);
     };
@@ -1212,12 +1248,7 @@ export class Chrome {
     const review = (found: PlanNote[], why: PlanTrouble | null, wait?: number) => {
       notes = found;
       const weekOf = b.state.meta.weekOf;
-      const whenOf = (n: PlanNote) => {
-        const day = n.day ?? findDay(n.text)?.day ?? null;
-        const time = n.time ?? findTime(n.text);
-        const dayText = day === null ? "Any day" : weekOf ? `${DAY_HEADERS[day]} ${dateOf(weekOf, day).getDate()}` : DAY_HEADERS[day];
-        return `${dayText}${time !== null ? ` · ${formatTime(time)}` : ""}`;
-      };
+      const whenOf = (n: PlanNote) => whenLabel({ text: n.text, date: n.date ?? "", ...(n.time !== null ? { time: n.time } : {}) }, weekOf);
       card.innerHTML = `
         <h2>${notes.length ? `${notes.length} note${notes.length === 1 ? "" : "s"} from the chat` : "Nothing to add"}</h2>
         ${why ? `<p class="plan-why">${planTrouble(why, wait, live)}</p>` : ""}
@@ -1225,7 +1256,7 @@ export class Chrome {
           notes.length
             ? `<ul class="plan-list">${notes
                 .map(
-                  (n, i) => `<li><label><input type="checkbox" checked data-i="${i}" /><span class="when">${escapeHtml(whenOf(n))}</span><span class="what">${escapeHtml(n.text)}</span>${n.who ? `<span class="who">@${escapeHtml(n.who)}</span>` : ""}</label></li>`,
+                  (n, i) => `<li><label><input type="checkbox" checked data-i="${i}" /><span class="when">${escapeHtml(whenOf(n))}</span><span class="what">${escapeHtml(n.text)}</span>${n.who ? `<span class="who"><i style="--w:${nameColor(n.who)}">${escapeHtml(n.who.charAt(0).toUpperCase())}</i>${escapeHtml(n.who)}</span>` : ""}</label></li>`,
                 )
                 .join("")}</ul>
                <label class="check-line"><input type="checkbox" name="tidy" checked /> Tidy them into the week</label>`
@@ -1259,7 +1290,7 @@ export class Chrome {
   }
 
   /** The board's calendar feed, with the links that subscribe to it in Google, Apple and Outlook calendars. */
-  private calendarLinks() {
+  private calendarLinks(who = "") {
     const b = this.board;
     const cal = b.access?.cal;
     if (!cal || b.access?.local) return null;
@@ -1269,73 +1300,123 @@ export class Chrome {
     } catch {
       // floating times it is
     }
-    const feed = `${location.origin}/api/boards/${b.id}/cal/${cal}.ics${tz ? `?tz=${encodeURIComponent(tz)}` : ""}`;
+    const q = new URLSearchParams();
+    if (tz) q.set("tz", tz);
+    if (who) q.set("who", who);
+    const feed = `${location.origin}/api/boards/${b.id}/cal/${cal}.ics${q.size ? `?${q}` : ""}`;
     const webcal = feed.replace(/^https?:/, "webcal:");
     return {
       feed,
       apple: webcal,
       google: `https://calendar.google.com/calendar/r?cid=${encodeURIComponent(webcal)}`,
-      outlook: `https://outlook.live.com/calendar/0/addfromweb?url=${encodeURIComponent(feed)}&name=${encodeURIComponent(boardTitle(b.state.meta))}`,
+      outlook: `https://outlook.live.com/calendar/0/addfromweb?url=${encodeURIComponent(feed)}&name=${encodeURIComponent(`${boardTitle(b.state.meta)}${who ? ` · ${who}` : ""}`)}`,
     };
   }
 
   exportWeek() {
     const b = this.board;
     const weekOf = b.state.meta.weekOf || nextMonday();
+    const me = b.me.name.trim();
+    let who = "";
     const cal = this.calendarLinks();
     const d = this.dialog(
       `
       <h2>Export the week</h2>
+      <div class="seg" role="radiogroup" aria-label="Whose notes">
+        <button role="radio" aria-checked="true" data-who="" class="on">Everyone</button>
+        <button role="radio" aria-checked="false" data-who="me"${me ? "" : " disabled"}>${me ? `Just ${escapeHtml(me)}’s` : "Just mine"}</button>
+      </div>
       ${
         cal
           ? `<section class="subscribe">
-        <div class="sub-head">${icon("cal")}<div><b>Keep it in your calendar</b><span>Subscribe once and your calendar follows the board as it changes.</span></div></div>
+        <div class="sub-head">${icon("cal")}<div><b>Keep it in your calendar</b><span class="sub-what">Subscribe once and your calendar follows the board as it changes.</span></div></div>
         <div class="cal-row">
-          <a class="btn" data-cal="google" href="${escapeHtml(cal.google)}" target="_blank" rel="noopener noreferrer">Google Calendar</a>
-          <a class="btn" data-cal="apple" href="${escapeHtml(cal.apple)}">Apple Calendar</a>
-          <a class="btn" data-cal="outlook" href="${escapeHtml(cal.outlook)}" target="_blank" rel="noopener noreferrer">Outlook</a>
-          <button class="btn ghost" data-cal="copy" data-url="${escapeHtml(cal.feed)}">${icon("copy")}<span>Copy link</span></button>
+          <a class="btn" data-cal="google" target="_blank" rel="noopener noreferrer">Google Calendar</a>
+          <a class="btn" data-cal="apple">Apple Calendar</a>
+          <a class="btn" data-cal="outlook" target="_blank" rel="noopener noreferrer">Outlook</a>
+          <button class="btn ghost" data-cal="copy">${icon("copy")}<span>Copy link</span></button>
         </div>
         <p class="fine">Each calendar looks for changes on its own clock: Apple and Outlook within hours, Google sometimes only once a day. Anyone with this calendar link can read the notes that name a day; new links or a new password (Board settings) switch it off.</p>
       </section>`
           : ""
       }
-      <p class="muted">Every note that names a day, in day order. Notes with a time (“8 am”, “16:00”, “下午4点”) become timed events.</p>
-      <label class="field">Week starting <input type="date" value="${weekOf}" /></label>
+      <p class="muted">Every note that names a day, by date. Notes with a time (“8 am”, “16:00”, “下午4点”) become timed events.</p>
+      <label class="field">The board’s week <span class="hint">Notes that only name a weekday fall in this week</span><input type="date" value="${weekOf}" /></label>
       <pre class="preview"></pre>
-      <div class="actions wrap">
+      <div class="downloads">
+        <button class="btn" data-x="png">${icon("image")}<span>Picture</span></button>
+        <button class="btn" data-x="csv">${icon("sheet")}<span>Spreadsheet</span></button>
+        <button class="btn" data-x="ics">${icon("export")}<span>Calendar file</span></button>
+      </div>
+      <div class="actions">
         <button class="btn ghost" data-close>Close</button>
-        <button class="btn" data-x="csv">Spreadsheet (.csv)</button>
-        <button class="btn" data-x="ics">Calendar file (.ics)</button>
-        <button class="btn primary" data-x="md">Copy as text</button>
+        <button class="btn primary" data-x="md">${icon("copy")}<span>Copy as text</span></button>
       </div>`,
       "export-dialog",
     );
     const date = d.el.querySelector<HTMLInputElement>("input[type=date]")!;
     const pre = d.el.querySelector("pre")!;
-    d.el.querySelector("[data-cal='copy']")?.addEventListener("click", (e) => this.copy((e.currentTarget as HTMLElement).dataset.url!, "Calendar link copied: add it in your calendar as a subscription"));
+    const opts = () => (who ? { who } : {});
     const meta = () => ({ ...b.state.meta, weekOf: /^\d{4}-\d{2}-\d{2}$/.test(date.value) ? mondayOf(date.value) : weekOf });
-    const render = () => (pre.textContent = toMarkdown(meta(), b.state.list()));
+    const render = () => {
+      pre.textContent = toMarkdown(meta(), b.state.list(), opts());
+      const links = this.calendarLinks(who);
+      if (!links) return;
+      for (const a of d.el.querySelectorAll<HTMLElement>("[data-cal]")) {
+        const k = a.dataset.cal as "google" | "apple" | "outlook" | "copy";
+        if (k === "copy") a.dataset.url = links.feed;
+        else a.setAttribute("href", links[k]);
+      }
+      d.el.querySelector(".sub-what")!.textContent = who
+        ? `Only the notes for ${who}: subscribe once and your calendar follows them as they change.`
+        : "Subscribe once and your calendar follows the board as it changes.";
+    };
     render();
+    d.el.querySelector(".seg")!.addEventListener("click", (e) => {
+      const btn = (e.target as HTMLElement).closest<HTMLButtonElement>("[data-who]");
+      if (!btn || btn.disabled) return;
+      who = btn.dataset.who === "me" ? me : "";
+      for (const x of d.el.querySelectorAll<HTMLButtonElement>(".seg [data-who]")) {
+        const on = x === btn;
+        x.classList.toggle("on", on);
+        x.setAttribute("aria-checked", String(on));
+      }
+      render();
+    });
+    d.el.querySelector("[data-cal='copy']")?.addEventListener("click", (e) => this.copy((e.currentTarget as HTMLElement).dataset.url!, "Calendar link copied: add it in your calendar as a subscription"));
     date.addEventListener("change", () => {
       const m = meta();
       date.value = m.weekOf;
       if (m.weekOf !== b.state.meta.weekOf && !b.readOnly) b.setMeta({ weekOf: m.weekOf });
       render();
     });
-    d.el.querySelector(".actions")!.addEventListener("click", async (e) => {
-      const x = (e.target as HTMLElement).closest<HTMLButtonElement>("[data-x]")?.dataset.x;
+    d.el.addEventListener("click", async (e) => {
+      const btn = (e.target as HTMLElement).closest<HTMLButtonElement>("[data-x]");
+      const x = btn?.dataset.x;
       if (!x) return;
       const m = meta();
+      const stem = `${fileStem(m)}${who ? `-${fileStem({ ...m, client: who, file: "" })}` : ""}`;
       if (x === "md") {
         try {
-          await navigator.clipboard.writeText(toMarkdown(m, b.state.list()));
+          await navigator.clipboard.writeText(toMarkdown(m, b.state.list(), opts()));
           this.toast("Copied: paste it into a message or a doc");
         } catch {
           this.toast("Copy didn’t work here: select the text above instead");
         }
-      } else if (x === "ics") download(`${fileStem(m)}.ics`, toIcs(m, b.state.list(), b.id), "text/calendar");
-      else download(`${fileStem(m)}.csv`, toCsv(m, b.state.list()), "text/csv");
+      } else if (x === "png") {
+        btn!.disabled = true;
+        try {
+          const blob = await weekPicture(m, b.state.list(), opts());
+          const file = new File([blob], `${stem}.png`, { type: "image/png" });
+          if (matchMedia("(pointer: coarse)").matches && navigator.canShare?.({ files: [file] })) await navigator.share({ files: [file] }).catch(() => {});
+          else downloadBlob(file.name, blob);
+        } catch {
+          this.toast("The picture didn’t work here. Try again, or copy as text.");
+        } finally {
+          btn!.disabled = false;
+        }
+      } else if (x === "ics") download(`${stem}.ics`, toIcs(m, b.state.list(), b.id, new Date(), undefined, opts()), "text/calendar");
+      else download(`${stem}.csv`, toCsv(m, b.state.list(), opts()), "text/csv");
     });
   }
 }
@@ -1347,7 +1428,10 @@ function demoBack(): string | null {
 }
 
 function download(name: string, text: string, type: string) {
-  const blob = new Blob([text], { type: `${type};charset=utf-8` });
+  downloadBlob(name, new Blob([text], { type: `${type};charset=utf-8` }));
+}
+
+function downloadBlob(name: string, blob: Blob) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;

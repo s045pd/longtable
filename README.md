@@ -70,23 +70,29 @@ with no day get an *Any day* column; photos, lists and headings line up
 under the week. Tidy again later and new notes slot into the week you have.
 One undo takes it all back.
 
-Prefer to choose? Press **Day** (`D`) to pick a day and time by hand, or drag
-a note into a column.
+A note can also carry a date of its own. Today's jobs stay in this week, and
+next week's get a week of their own underneath, so one board holds “today”
+and “next Wednesday” at once without pushing anything a week out.
+
+Prefer to choose? Press **Day** (`D`) to pick a date, a time and whose it is,
+or drag a note into a column. Whose it is shows as a name tag in the note's
+corner, not as “@name” in its words.
 
 </td>
 </tr>
 <tr>
-<td width="50%"><img src="docs/images/plan.png" alt="“6 notes from the chat”: Flyers out on Thursday at 08:00 for Ana, Bring cake stand on Friday for Bo, Call printer on Friday for Cy, 试吃 on Thursday at 16:00, 订蛋糕 for 小王 and Count till on Sunday for Eli, each with a checkbox, and “Tidy them into the week” ticked." /></td>
+<td width="50%"><img src="docs/images/plan.png" alt="“6 notes from the chat”: Flyers out on Thursday 26 at 08:00 for Ana, Bring the cake stand and Call the printer on Friday 20 Nov for Bo and Cy, 试吃 on Thursday 19 Nov at 16:00 and 订蛋糕 for 小王, Count the till on Sunday 22 Nov for Eli, each with a checkbox and a name tag, and “Tidy them into the week” ticked." /></td>
 <td width="50%" valign="top">
 
 ### Paste the group chat, get a plan
 
 Paste a chat, meeting notes or a to-do list (or press the chat button) and
 [Workers AI](https://developers.cloudflare.com/workers-ai/) picks out what
-needs doing: one note per task, with the day, the time and who took it on.
-It reads the whole chat first, so “actually Friday instead” moves the task
-rather than adding another, and a note stays in the language it was written
-in. Look the notes over, untick any you don't want, and add them tidied into
+needs doing: one note per task, with the date, the time and who took it on.
+“Today”, “tomorrow” and “next Wednesday” are worked out from today's date,
+and it reads the whole chat first, so “actually Friday instead” moves the
+task rather than adding another. A note stays in the language it was
+written in. Look the notes over, untick any you don't want, and add them tidied into
 the week.
 
 It runs on your own Cloudflare account's free AI allowance. The chat is
@@ -105,8 +111,23 @@ Calendar or Outlook to the board. Every note that names a day is an event,
 timed or all day, and when the plan changes, the calendars follow on their
 own. No sign-in, nothing to install.
 
-The same dialog copies the week as Markdown for a chat, or downloads a
-**CSV** for a spreadsheet or a one-off **`.ics`** file.
+Switch to **Just mine** and the calendar, the text and the files keep only
+the notes tagged with your name (or that say “@you”), so everyone can
+subscribe to their own jobs. The same dialog copies the week as Markdown for
+a chat, or downloads a **CSV** for a spreadsheet or a one-off **`.ics`** file.
+
+</td>
+<td width="50%"><img src="docs/images/export.png" alt="The Export the week dialog with “Just Ana’s” picked: “Keep it in your calendar” with Google Calendar, Apple Calendar, Outlook and Copy link, the board’s week, Ana’s notes as a Markdown checklist, then Picture, Spreadsheet and Calendar file buttons and Copy as text." /></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/images/picture.png" alt="The week as a picture: “Pell & Rye · Opening week”, this week and next week as two rows of day columns with every note card in its colour, times and name tags, then the photos and the bake list under “Also on the board”." /></td>
+<td width="50%" valign="top">
+
+### Send the week as a picture
+
+**Picture** draws the whole week, every card with its time and name tag,
+the photos and the checklists, as one sharp PNG to drop into a group chat.
+On a phone it opens the share sheet. **Just mine** works here too.
 
 ### Works on a phone, and offline for a while
 
@@ -114,7 +135,6 @@ One finger pans, two pinch, the tools sit at the bottom. Changes made while
 the connection drops are kept and sent when it comes back.
 
 </td>
-<td width="50%"><img src="docs/images/export.png" alt="The Export the week dialog: “Keep it in your calendar” with buttons for Google Calendar, Apple Calendar, Outlook and Copy link, then the week as a Markdown checklist and buttons for CSV and calendar files." /></td>
 </tr>
 </table>
 
@@ -195,7 +215,7 @@ the data is kept.
 | Key | Does | Key | Does |
 | --- | --- | --- | --- |
 | `V` | Select | `U` | Tidy up |
-| `N` | Note | `D` | Pick a day for the selection |
+| `N` | Note | `D` | Pick the day, time and who |
 | `T` | Heading | `Enter` | Edit the selected note |
 | `C` | Checklist | `Delete` | Delete |
 | `P` | Pen | Arrows | Nudge (`Shift` for more) |
@@ -229,8 +249,9 @@ covers live editing between people, the tidy, the export, and the privacy
 rules: keyless and made-up links, the watch link (also against a script
 talking to the server directly), passwords and the wait after wrong ones,
 guesses sent all at once, new links, clear, delete, the team password, the
-limit on new boards and the security headers. It also pastes a chat and checks
-the calendar feed and its key. Against a deployed Longtable the chat goes to
+limit on new boards and the security headers. It also pastes a chat, checks
+the calendar feed and its key, and that notes dated next week get a week of
+their own, name tags, *Just mine* and the picture. Against a deployed Longtable the chat goes to
 real Workers AI. To test a deployed Longtable:
 `BASE_URL=https://… npm run e2e` (add `TEAM_PASSWORD=…` if it has one).
 

@@ -1,11 +1,12 @@
 // The tidy: every note goes to the column of the day it names, in a grid of
-// seven weekday columns (and an ANY DAY column when some notes name no day).
+// seven weekday columns (and an ANY DAY column when some notes name no day),
+// one grid for each week that notes with a date of their own fall in.
 // Within a day, notes without a time come first, then the timed ones in
 // order. Anything else that was tidied (photos, checklists, labels, pen
 // strokes) lines up in a row under the week. A board that already has a week
 // keeps it: the notes already in it are sorted again together with the new.
 // A day or time picked by hand on a note wins over the words on it.
-import { ANY, noteDay, noteTime } from "./days";
+import { ANY, ISO_DATE, addDays, noteDay, noteTime, noteWeek } from "./days";
 import { NOTE, PITCH_X, PITCH_Y, HEADER_GAP, bounds, union, type Box } from "./geometry";
 import type { Effect, Item, NoteItem, Op, WeekItem } from "./types";
 
@@ -39,77 +40,121 @@ export function notesInWeek(week: WeekItem, notes: NoteItem[]): NoteItem[] {
 
 const readingOrder = (a: Item, b: Item) => (Math.abs(a.y - b.y) > 60 ? a.y - b.y : a.x - b.x);
 
-export function planTidy(board: Item[], targetIds: string[] | null, newId: () => string): TidyPlan | null {
+/** The Monday a week shows: its own, or the board's week. */
+export const weekStart = (w: WeekItem, weekOf: string) => (w.of && ISO_DATE.test(w.of) ? w.of : weekOf);
+
+/** From the last row of one week down to the first row of the next: room for the next week's headers. */
+const WEEK_GAP = NOTE / 2 + 96 + HEADER_GAP + 34;
+
+/** Every week on the board, top to bottom. */
+export const weeksOn = (board: Item[]) => board.filter((it): it is WeekItem => it.type === "week").sort((a, b) => a.y - b.y);
+
+const byTime = (a: NoteItem, b: NoteItem) => {
+  const ta = noteTime(a);
+  const tb = noteTime(b);
+  if (ta === null && tb === null) return readingOrder(a, b);
+  if (ta === null) return -1;
+  if (tb === null) return 1;
+  return ta - tb || readingOrder(a, b);
+};
+
+/**
+ * Lay notes out by day. The board's own week (meta.weekOf) takes the notes
+ * that name a weekday or no day; a note with a date of its own goes to its
+ * date's week, so "today" and "next Wednesday" can both be right. Each week
+ * is a band of seven columns (eight when the board's week has an ANY DAY
+ * column), one under the other in date order.
+ */
+export function planTidy(board: Item[], targetIds: string[] | null, newId: () => string, weekOf = ""): TidyPlan | null {
   const chosen = targetIds ? new Set(targetIds) : null;
   const targets = chosen ? board.filter((it) => chosen.has(it.id)) : board.slice();
   const allNotes = board.filter((it): it is NoteItem => it.type === "note");
-  const week = (targets.find((it) => it.type === "week") ?? board.find((it) => it.type === "week")) as WeekItem | undefined;
+  const existing = weeksOn(board);
 
   const noteIds = new Set(targets.filter((it) => it.type === "note").map((it) => it.id));
-  if (week) for (const n of notesInWeek(week, allNotes)) noteIds.add(n.id);
+  for (const w of existing) for (const n of notesInWeek(w, allNotes)) noteIds.add(n.id);
   const notes = allNotes.filter((n) => noteIds.has(n.id));
   if (!notes.length) return null;
   const others = targets.filter((it) => it.type !== "note" && it.type !== "week");
 
-  // Columns: Monday … Sunday, then ANY DAY.
-  const columns: NoteItem[][] = Array.from({ length: 8 }, () => []);
-  for (const n of notes) columns[noteDay(n) ?? 7].push(n);
-  const cols = columns[7].length ? 8 : 7;
-  for (const column of columns) {
-    column.sort((a, b) => {
-      const ta = noteTime(a);
-      const tb = noteTime(b);
-      if (ta === null && tb === null) return readingOrder(a, b);
-      if (ta === null) return -1;
-      if (tb === null) return 1;
-      return ta - tb || readingOrder(a, b);
-    });
+  // Group by week, then by day: Monday … Sunday, and ANY DAY in the board's week.
+  const groups = new Map<string, NoteItem[][]>();
+  for (const n of notes) {
+    const key = noteWeek(n, weekOf);
+    if (!groups.has(key)) groups.set(key, Array.from({ length: 8 }, () => []));
+    groups.get(key)![noteDay(n) ?? 7].push(n);
   }
+  for (const columns of groups.values()) for (const column of columns) column.sort(byTime);
+  const keys = [...groups.keys()].sort();
 
-  // Where the week sits: an existing week stays put; a new one takes the
-  // top-left corner of what is being tidied.
+  // Where the weeks sit: the topmost existing week stays put; a board without
+  // one takes the top-left corner of what is tidied (or goes under the board
+  // when only a few things are tidied, clear of what stays where it is).
   let origin: { x: number; y: number };
-  const ops: Op[] = [];
-  let weekId: string;
-  if (week) {
-    origin = { x: week.x, y: week.y };
-    weekId = week.id;
-    if (week.cols !== cols) ops.push({ op: "patch", id: week.id, set: { cols } });
-  } else {
-    // Tidying everything: the week takes the board's top-left corner, since
-    // everything moves anyway. Tidying a few: it goes under the board, clear
-    // of what stays where it is.
+  if (existing.length) origin = { x: existing[0].x, y: existing[0].y };
+  else {
     const all = union(board.map(bounds))!;
     const partial = targets.length < board.length;
     origin = partial
       ? { x: Math.round(all.x0 + NOTE / 2), y: Math.round(all.y1 + 160 + HEADER_GAP) }
       : { x: Math.round(all.x0 + NOTE / 2), y: Math.round(all.y0 + HEADER_GAP + 40) };
-    weekId = newId();
-    const minZ = Math.min(0, ...board.map((it) => it.z));
-    ops.push({ op: "put", item: { id: weekId, type: "week", x: origin.x, y: origin.y, rot: 0, z: minZ - 1, cols } });
   }
 
+  const ops: Op[] = [];
   const delays: Record<string, number> = {};
-  let rows = 0;
+  const unused = new Set(existing.map((w) => w.id));
+  const weekIds: string[] = [];
+  const minZ = Math.min(0, ...board.map((it) => it.z));
+  let y = origin.y;
+  let rowBase = 0;
   let last = 0;
-  columns.slice(0, cols).forEach((column, col) => {
-    rows = Math.max(rows, column.length);
-    column.forEach((n, row) => {
-      const x = origin.x + col * PITCH_X;
-      const y = origin.y + row * PITCH_Y;
-      delays[n.id] = waveDelay(col, row);
-      last = Math.max(last, delays[n.id]);
-      if (n.x !== x || n.y !== y || n.rot !== 0) ops.push({ op: "patch", id: n.id, set: { x, y, rot: 0 } });
+  let maxCols = 7;
+  for (const key of keys) {
+    const columns = groups.get(key)!;
+    const cols = columns[7].length ? 8 : 7;
+    maxCols = Math.max(maxCols, cols);
+    const of = key === weekOf ? "" : key;
+    // Reuse a week already showing this one, if there is one.
+    const reuse = existing.find((w) => unused.has(w.id) && weekStart(w, weekOf) === key);
+    let id: string;
+    if (reuse) {
+      unused.delete(reuse.id);
+      id = reuse.id;
+      const set: Partial<WeekItem> = {};
+      if (reuse.cols !== cols) set.cols = cols;
+      if (reuse.x !== origin.x || reuse.y !== y) Object.assign(set, { x: origin.x, y });
+      if ((reuse.of ?? "") !== of) set.of = of;
+      if (Object.keys(set).length) ops.push({ op: "patch", id, set });
+    } else {
+      id = newId();
+      ops.push({ op: "put", item: { id, type: "week", x: origin.x, y, rot: 0, z: minZ - 1, cols, ...(of ? { of } : {}) } });
+    }
+    weekIds.push(id);
+    let rows = 0;
+    columns.slice(0, cols).forEach((column, col) => {
+      rows = Math.max(rows, column.length);
+      column.forEach((n, row) => {
+        const x = origin.x + col * PITCH_X;
+        const ny = y + row * PITCH_Y;
+        delays[n.id] = waveDelay(col, rowBase + row);
+        last = Math.max(last, delays[n.id]);
+        if (n.x !== x || n.y !== ny || n.rot !== 0) ops.push({ op: "patch", id: n.id, set: { x, y: ny, rot: 0 } });
+      });
     });
-  });
+    rows = Math.max(1, rows);
+    rowBase += rows + 1;
+    y += (rows - 1) * PITCH_Y + WEEK_GAP;
+  }
+  // Weeks left empty go.
+  for (const id of unused) ops.push({ op: "del", id });
 
-  // Everything else lines up under the week, wrapping at its width.
+  // Everything else lines up under the last week, wrapping at its width.
   const kinds = ["photo", "check", "label", "stroke"];
   others.sort((a, b) => kinds.indexOf(a.type) - kinds.indexOf(b.type) || readingOrder(a, b));
   const left = origin.x - NOTE / 2;
-  const width = (cols - 1) * PITCH_X + NOTE;
+  const width = (maxCols - 1) * PITCH_X + NOTE;
   let cursorX = left;
-  let rowTop = origin.y + Math.max(1, rows) * PITCH_Y - PITCH_Y / 2 + 60;
+  let rowTop = y - WEEK_GAP + PITCH_Y / 2 + 60;
   let rowHeight = 0;
   others.forEach((it, i) => {
     const b = bounds(it);
@@ -120,24 +165,24 @@ export function planTidy(board: Item[], targetIds: string[] | null, newId: () =>
       rowTop += rowHeight + 40;
       rowHeight = 0;
     }
-    const dx = cursorX - b.x0;
-    const dy = rowTop - b.y0;
-    const x = Math.round(it.x + dx);
-    const y = Math.round(it.y + dy);
+    const x = Math.round(it.x + cursorX - b.x0);
+    const oy = Math.round(it.y + rowTop - b.y0);
     cursorX += w + 40;
     rowHeight = Math.max(rowHeight, h);
     delays[it.id] = last + 0.08 + i * 0.03;
-    if (x !== it.x || y !== it.y || it.rot !== 0) ops.push({ op: "patch", id: it.id, set: { x, y, ...(it.type === "stroke" ? {} : { rot: 0 }) } });
+    if (x !== it.x || oy !== it.y || it.rot !== 0) ops.push({ op: "patch", id: it.id, set: { x, y: oy, ...(it.type === "stroke" ? {} : { rot: 0 }) } });
   });
 
   const after = new Map(board.map((it) => [it.id, it]));
   for (const op of ops) {
     if (op.op === "put") after.set(op.item.id, op.item);
     else if (op.op === "patch") after.set(op.id, { ...after.get(op.id)!, ...op.set } as Item);
+    else if (op.op === "del") after.delete(op.id);
   }
-  const moved = [weekId, ...notes.map((n) => n.id), ...others.map((o) => o.id)];
+  const moved = [...weekIds, ...notes.map((n) => n.id), ...others.map((o) => o.id)];
   const box = union(moved.map((id) => bounds(after.get(id)!)))!;
-  return { ops, fx: { kind: "tidy", delays, week: weekId, count: notes.length }, box, count: notes.length };
+  const fx: Effect = { kind: "tidy", delays, week: weekIds[0], count: notes.length, ...(weekIds.length > 1 ? { weeks: weekIds } : {}) };
+  return { ops, fx, box, count: notes.length };
 }
 
 /** How many rows the week's fullest column has. */
@@ -160,34 +205,42 @@ export function columnAt(week: WeekItem, rows: number, x: number, y: number): nu
 }
 
 /**
- * Notes let go of after a drag. Each one that lands in a column of the week
- * takes that column's day (picked by hand from then on), and the week sorts
- * itself again so they slot in and the gaps they left close up. `leaving`
- * are the notes that sat in the week when the drag began.
+ * Notes let go of after a drag. Each one that lands in a column of a week
+ * takes that column's day (picked by hand from then on: a weekday in the
+ * board's week, a date in any other), and the weeks sort themselves again so
+ * they slot in and the gaps they left close up. `leaving` are the notes that
+ * sat in a week when the drag began.
  */
-export function planDrop(board: Item[], dropped: string[], leaving: string[], newId: () => string): Op[] {
-  const week = board.find((it): it is WeekItem => it.type === "week");
-  if (!week) return [];
+export function planDrop(board: Item[], dropped: string[], leaving: string[], newId: () => string, weekOf = ""): Op[] {
+  const weeks = weeksOn(board);
+  if (!weeks.length) return [];
   const moving = new Set(dropped);
   const notes = board.filter((it): it is NoteItem => it.type === "note");
-  const rows = weekRows(week, notes.filter((n) => !moving.has(n.id)));
+  const still = notes.filter((n) => !moving.has(n.id));
+  const rows = new Map(weeks.map((w) => [w.id, weekRows(w, still)]));
   const ops: Op[] = [];
   const landed: string[] = [];
   const after = new Map(board.map((it) => [it.id, it]));
   for (const id of dropped) {
     const n = after.get(id);
     if (!n || n.type !== "note") continue;
-    const col = columnAt(week, rows, n.x, n.y);
-    if (col === null) continue;
+    let hit: { week: WeekItem; col: number } | null = null;
+    for (const w of weeks) {
+      const col = columnAt(w, rows.get(w.id)!, n.x, n.y);
+      if (col !== null) hit = { week: w, col };
+    }
+    if (!hit) continue;
     landed.push(id);
-    const want = col >= 7 ? null : col;
-    if (noteDay(n) !== want) {
-      const set = { day: want === null ? ANY : want };
+    const start = weekStart(hit.week, weekOf);
+    const day = hit.col >= 7 ? null : hit.col;
+    const week = day === null ? weekOf : start;
+    if (noteDay(n) !== day || noteWeek(n, weekOf) !== week) {
+      const set: Partial<NoteItem> = day === null ? { day: ANY, date: "" } : week === weekOf ? { day, date: "" } : { date: addDays(week, day) };
       ops.push({ op: "patch", id, set });
-      after.set(id, { ...n, ...set });
+      after.set(id, { ...n, ...set } as NoteItem);
     }
   }
   if (!landed.length && !leaving.some((id) => moving.has(id))) return [];
-  const plan = planTidy([...after.values()], landed, newId);
+  const plan = planTidy([...after.values()], landed, newId, weekOf);
   return plan ? [...ops, ...plan.ops] : ops;
 }

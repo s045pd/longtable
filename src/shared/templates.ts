@@ -1,7 +1,7 @@
 // Boards a new board can start from. "pell-and-rye" is the example: a
 // fictional bakery's opening week, planned by five fictional people, with the
 // notes grouped by topic so the tidy has something to sort.
-import { nextMonday } from "./days";
+import { isoDate, mondayOf, nextMonday } from "./days";
 import type { Item, Meta, NoteItem } from "./types";
 
 export const TEMPLATES = ["pell-and-rye", "blank"] as const;
@@ -23,7 +23,8 @@ export interface Seed {
 
 export function makeTemplate(name: TemplateName, today = new Date()): Seed {
   if (name === "blank") {
-    return { meta: { client: "My team", file: "This week", weekOf: nextMonday(today), template: "" }, items: [] };
+    // "This week" plans this week: today's notes and the rest of the week's.
+    return { meta: { client: "My team", file: "This week", weekOf: mondayOf(isoDate(today)), template: "" }, items: [] };
   }
   let z = 0;
   const items: Item[] = [];

@@ -33,7 +33,7 @@ export default {
     // Start a board: { template, password? } → { id, edit, owner }, the keys of its links.
     if (path === "/api/boards" && request.method === "POST") {
       if (request.headers.get("content-type")?.split(";")[0] !== "application/json") return json({ error: "Send JSON" }, 415);
-      let body: { template?: unknown; password?: unknown } = {};
+      let body: { template?: unknown; password?: unknown; today?: unknown } = {};
       try {
         body = await request.json();
       } catch {
@@ -46,7 +46,7 @@ export default {
       }
       const template = validTemplate(body.template) ? (body.template as string) : "blank";
       const id = newBoardId();
-      const keys = await env.BOARDS.get(env.BOARDS.idFromName(id)).seed(template);
+      const keys = await env.BOARDS.get(env.BOARDS.idFromName(id)).seed(template, typeof body.today === "string" ? body.today : undefined);
       if (!keys) return json({ error: "Try again" }, 409);
       return json({ id, ...keys }, 201);
     }

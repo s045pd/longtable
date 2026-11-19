@@ -2,12 +2,13 @@
 // moved and tilted with one transform; its shape hangs off that point. Items
 // move instantly for your own changes, glide for other people's, and spring
 // in a wave when someone tidies.
-import { ANY_DAY, DAY_HEADERS, dateOf, dayPicked, findDay, noteDay, timePicked, whenLabel } from "../shared/days";
+import { ANY_DAY, DAY_HEADERS, dateOf, datePicked, dayPicked, findDay, noteDay, noteWho, timePicked, whenLabel } from "../shared/days";
+import { PALETTE } from "../shared/colors";
 import { CHECK, HEADER_GAP, LABEL_SIZE, NOTE, PHOTO, PITCH_X, bounds, checkHeight } from "../shared/geometry";
 import { tones } from "../shared/colors";
 import type { CheckItem, Item, LabelItem, NoteItem, PhotoItem, StrokeItem, WeekItem } from "../shared/types";
 import { artSvg } from "./art";
-import { fitNote } from "./fit";
+import { NOTE_ROOM, STAMP_ROOM, WHO_ROOM, fitNote } from "./fit";
 
 export type Motion = { kind: "now" } | { kind: "glide" } | { kind: "spring"; delay: number };
 
@@ -30,6 +31,14 @@ export const SPRING = (() => {
 /** The board's week (its Monday), so notes and the week can show real dates. */
 let weekOf = "";
 export const setWeekOf = (iso: string) => (weekOf = iso);
+
+/** The colour for a name on a note's tag: the person's own when they are on the board, else one picked from the name. */
+let colorOfName = (name: string) => PALETTE[hash(name.trim().toLowerCase()) % PALETTE.length];
+export const setNameColors = (fn: (name: string) => string | undefined) => {
+  const fallback = colorOfName;
+  colorOfName = (name) => fn(name) ?? fallback(name);
+};
+export const nameColor = (name: string) => colorOfName(name);
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
@@ -59,10 +68,10 @@ export function strokePath(pts: number[], dx = 0, dy = 0): string {
   return d + `L${lx.toFixed(1)} ${ly.toFixed(1)}`;
 }
 
-function noteWords(it: NoteItem): string {
-  const fit = fitNote(it.text);
+function noteWords(it: NoteItem, stamped: boolean): string {
+  const fit = fitNote(it.text, NOTE_ROOM - (noteWho(it) ? WHO_ROOM : 0) - (stamped ? STAMP_ROOM : 0));
   // Underline the day word only while it is what decides the day.
-  const named = findDay(it.text);
+  const named = datePicked(it) ? null : findDay(it.text);
   const day = named && named.day === noteDay(it) ? named : null;
   let marked = false;
   const lines = fit.lines.map((line) => {
@@ -75,7 +84,14 @@ function noteWords(it: NoteItem): string {
     }
     return esc(line) || "&nbsp;";
   });
-  return `<div class="words" style="font-size:${fit.size}px">${lines.map((l) => `<div>${l}</div>`).join("")}</div>`;
+  return `<div class="words${stamped ? " stamped" : ""}" style="font-size:${fit.size}px">${lines.map((l) => `<div>${l}</div>`).join("")}</div>`;
+}
+
+/** Whose note it is, as a small tag in the corner rather than words in the note. */
+function whoTag(it: NoteItem): string {
+  const who = noteWho(it);
+  if (!who) return "";
+  return `<button class="who-tag" title="Whose it is · D" aria-label="For ${esc(who)}. Change who"><i style="--w:${nameColor(who)}">${esc(who.charAt(0).toUpperCase())}</i><span>${esc(who)}</span></button>`;
 }
 
 function voteDots(it: NoteItem): string {
@@ -166,8 +182,9 @@ export class ItemView {
     this.shape.style.cssText = `width:${NOTE}px;height:${NOTE}px;left:${-NOTE / 2}px;top:${-NOTE / 2}px;--c:${t.base};--c-light:${t.light};--c-dark:${t.dark}`;
     this.shape.innerHTML =
       `<div class="shadow"></div><div class="paper${curl ? " curl" : ""}"></div>${curl ? '<div class="fold"></div>' : ""}` +
-      noteWords(it) +
+      noteWords(it, picked) +
       voteDots(it) +
+      whoTag(it) +
       `<button class="day-tag${picked ? " picked" : ""}" title="Pick the day · D" aria-label="Day: ${esc(whenLabel(it, weekOf))}. Pick the day">${esc(whenLabel(it, weekOf))}</button>`;
     this.shape.title = it.by ? `${it.by}` : "";
   }
@@ -213,9 +230,11 @@ export class ItemView {
     const w = (it.cols - 1) * PITCH_X + NOTE;
     this.shape.style.cssText = `left:${-NOTE / 2}px;top:${-HEADER_GAP - 34}px;width:${w}px;height:56px`;
     const heads = [...DAY_HEADERS, ANY_DAY].slice(0, it.cols);
+    const start = it.of || weekOf;
+    this.el.classList.toggle("other-week", !!it.of && it.of !== weekOf);
     const date = (i: number) => {
-      if (!weekOf || i > 6) return "";
-      const d = dateOf(weekOf, i);
+      if (!start || i > 6) return "";
+      const d = dateOf(start, i);
       return `<b>${d.getDate()} ${d.toLocaleString("en-GB", { month: "short" }).toUpperCase()}</b>`;
     };
     this.shape.innerHTML = heads
