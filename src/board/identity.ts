@@ -3,7 +3,7 @@
 // windows and blocked storage throw.
 import { randomId } from "../shared/ids";
 import type { BoardKeys } from "./net";
-import type { Item, Meta } from "../shared/types";
+import type { Item, Meta, Role } from "../shared/types";
 
 export interface Identity {
   cid: string;
@@ -43,6 +43,8 @@ export interface RecentBoard {
   id: string;
   title: string;
   at: number;
+  /** What you were on it last time: owner, editor or viewer. */
+  role?: Role;
 }
 const RECENT = "longtable:recent";
 /** How many boards "Your boards" keeps. */
@@ -57,10 +59,13 @@ export function recentBoards(): RecentBoard[] {
   }
 }
 
-export function rememberBoard(id: string, title: string) {
+export function rememberBoard(id: string, title: string, role?: Role) {
   try {
-    const list = recentBoards().filter((b) => b.id !== id);
-    list.unshift({ id, title, at: Date.now() });
+    const all = recentBoards();
+    const was = all.find((b) => b.id === id);
+    const list = all.filter((b) => b.id !== id);
+    const r = role ?? was?.role;
+    list.unshift({ id, title, at: Date.now(), ...(r ? { role: r } : {}) });
     localStorage.setItem(RECENT, JSON.stringify(list.slice(0, RECENT_MAX)));
   } catch {
     // ignore

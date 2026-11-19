@@ -721,12 +721,64 @@ try {
     await H.click(".topbar .home");
     await H.click(".boards-menu [data-menu='settings']");
     await settle(H.waitForSelector(".settings-dialog.open [data-act='delete']", { timeout: 3000 }), "Board settings is in the menu too, with Delete for the owner");
-    await H.context().close();
-    for (const r of named) {
-      r.send({ t: "admin", act: "delete" });
-      await r.next(["done"]);
-      r.close();
+
+    // Deleting the board you're on takes you on to your next one, not to a dead end.
+    await H.click(".settings-dialog [data-act='delete']");
+    await H.fill(".confirm-dialog input[name=typed]", "delete");
+    await H.click(".confirm-dialog .yes");
+    await settle(H.waitForFunction((id) => location.pathname === `/b/${id}` && document.querySelector(".names .file")?.textContent === "Q1 roadmap", two.id, { timeout: 6000 }), "deleting a board goes straight on to the board opened before it");
+    check(/Deleted “.*Launch party”/.test(await H.$eval(".toasts", (t) => t.textContent)), "and says which one went");
+    check((await api(`/api/boards/${one.id}/snapshot`, { "x-longtable-owner": one.owner })).status === 404, "it is gone from the server");
+
+    // Manage boards: tick several, delete the ones you own in one go.
+    const three = await (await makeBoard("blank")).json();
+    const four = await (await makeBoard("blank")).json();
+    const theirs = await (await makeBoard("blank")).json();
+    for (const [b, k] of [[three, `o=${three.owner}`], [four, `o=${four.owner}`], [theirs, `k=${theirs.edit}`], [two, `o=${two.owner}`]]) {
+      await H.goto(`${base}/b/${b.id}#${k}`);
+      await H.waitForSelector(".board-app .empty-hint.show", { timeout: 6000 });
     }
+    // Someone else is on one of them when it goes.
+    const J = await person(browser, "Jo", "#FFB38A");
+    await J.goto(`${base}/b/${theirs.id}#k=${theirs.edit}`);
+    await J.waitForSelector(".board-app .empty-hint.show", { timeout: 6000 });
+    await J.goto(`${base}/b/${three.id}#k=${three.edit}`);
+    await J.waitForSelector(".board-app .empty-hint.show", { timeout: 6000 });
+    await H.click(".topbar .home");
+    await H.click(".boards-menu [data-menu='manage']");
+    await settle(H.waitForSelector(".manage-dialog.open .manage-list", { timeout: 3000 }), "Manage boards lists every board on this device");
+    const rows = await H.$$eval(".manage-list li", (ls) => ls.map((l) => ({ id: l.querySelector("input").value, role: l.querySelector(".role").textContent, here: !!l.querySelector(".here-tag") })));
+    check(rows.length === 4 && rows.find((r) => r.id === theirs.id)?.role === "Can edit" && rows.find((r) => r.id === two.id)?.here, "with what you are on each and which one is open");
+    for (const b of [three, four, theirs]) await H.check(`.manage-list input[value="${b.id}"]`);
+    check((await H.$eval(".manage-dialog [data-act=delete]", (b) => b.textContent)) === "Delete 2 boards…", "Delete counts only the boards you own");
+    check(/isn’t yours/.test(await H.$eval(".manage-note", (n) => n.textContent)), "and says the other one stays");
+    await H.click(".manage-dialog [data-act=delete]");
+    await H.fill(".confirm-dialog input[name=typed]", "delete");
+    await H.click(".confirm-dialog .yes");
+    await settle(H.waitForFunction(() => document.querySelectorAll(".manage-list li").length === 2, null, { timeout: 6000 }), "both go in one go, and leave the list");
+    check((await api(`/api/boards/${three.id}/snapshot`, { "x-longtable-owner": three.owner })).status === 404 && (await api(`/api/boards/${four.id}/snapshot`, { "x-longtable-owner": four.owner })).status === 404, "deleted on the server");
+    check((await gateKind(J)) === "deleted", "whoever was on one is told it's gone");
+    check((await J.$$eval(".gate-boards a", (as) => as.map((a) => a.getAttribute("href")))).includes(`/b/${theirs.id}`), "and the deleted screen lists their other boards to go to");
+    await H.check(`.manage-list input[value="${theirs.id}"]`);
+    await H.click(".manage-dialog [data-act=forget]");
+    check(!(await H.$(`.manage-list input[value="${theirs.id}"]`)) && (await api(`/api/boards/${theirs.id}/snapshot`, { "x-longtable-key": theirs.edit })).status === 200, "Remove from this list forgets a board here and leaves it be");
+    check((await fetch(`${base}/api/boards/${theirs.id}/delete`, { method: "POST", headers: { "x-longtable-owner": "a".repeat(26) } })).status === 403, "the delete address needs the owner key");
+    check((await fetch(`${base}/api/boards/${theirs.id}/delete`, { method: "POST", headers: { "x-longtable-owner": theirs.owner, origin: "https://elsewhere.example" } })).status === 403, "and refuses other sites");
+    // The last board: the deleted screen says you did it.
+    await H.click(".manage-dialog [data-close]");
+    await H.click(".topbar .settings-btn");
+    await H.click(".settings-dialog [data-act='delete']");
+    await H.fill(".confirm-dialog input[name=typed]", "delete");
+    await H.click(".confirm-dialog .yes");
+    check((await gateKind(H)) === "deleted" && /Deleted “.*Q1 roadmap”/.test(await H.$eval(".gate h1", (h) => h.textContent)), "with no board left, the deleted screen says which one you deleted");
+    await H.context().close();
+    await J.context().close();
+    for (const r of named) r.close();
+    const ro = await rawSession(theirs.id, { owner: theirs.owner });
+    await ro.next(["init"]);
+    ro.send({ t: "admin", act: "delete" });
+    await ro.next(["done"]);
+    ro.close();
   }
 
   // An AI assistant plans on the board over MCP.

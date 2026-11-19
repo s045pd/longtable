@@ -3041,3 +3041,177 @@ a.btn {
     display: none;
   }
 }
+
+/* ------------------------------------------------------- manage boards */
+.gated .dialog {
+  z-index: 70;
+}
+.manage-dialog .card {
+  width: min(560px, 100%);
+}
+.manage-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 16px 0 6px;
+  padding: 0 10px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.manage-head .count {
+  font: 12px var(--mono);
+}
+.tick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  cursor: pointer;
+}
+.tick input {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--chalk);
+  cursor: pointer;
+}
+.manage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: min(380px, 50dvh);
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.manage-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 10px;
+  border-radius: 10px;
+}
+.manage-list li:hover {
+  background: var(--hover);
+}
+.manage-list li.on {
+  background: var(--raise);
+}
+.manage-list .tick {
+  flex: 1;
+  align-self: stretch;
+}
+.manage-list .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  color: var(--chalk);
+}
+.manage-list .role {
+  flex: none;
+  font-size: 12px;
+  color: var(--muted);
+}
+.manage-list .role.owner {
+  color: var(--chalk);
+}
+.manage-list .open,
+.manage-list .here-tag {
+  flex: none;
+  font-size: 13px;
+  color: var(--muted);
+}
+.manage-list .open {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.manage-list .open:hover {
+  color: var(--chalk);
+}
+.manage-list time {
+  flex: none;
+  width: 52px;
+  text-align: right;
+  font: 12px var(--mono);
+  color: var(--muted);
+}
+.manage-empty {
+  margin: 18px 0 4px;
+  color: var(--muted);
+  font-size: 14px;
+}
+.manage-dialog .manage-note {
+  margin: 12px 0 0;
+  min-height: 2.6em;
+}
+@media (max-width: 520px) {
+  .manage-list .role {
+    display: none;
+  }
+}
+
+/* Your boards on the "deleted" / "link" screens. */
+.gate-boards {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 18px 0 0;
+  padding: 6px;
+  border-radius: 14px;
+  background: var(--raise);
+  text-align: left;
+}
+.gate-boards-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.gate-boards a {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 40px;
+  padding: 0 8px;
+  border-radius: 8px;
+  color: var(--chalk);
+  text-decoration: none;
+  font-size: 14px;
+}
+.gate-boards a:hover {
+  background: var(--hover);
+}
+.gate-boards a span {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gate-boards time {
+  font: 12px var(--mono);
+  color: var(--muted);
+}
+.link-btn {
+  padding: 2px 0;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--chalk);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.gate-boards .link-btn.more {
+  align-self: flex-start;
+  margin: 4px 8px 4px;
+  color: var(--muted);
+}

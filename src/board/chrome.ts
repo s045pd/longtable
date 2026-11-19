@@ -8,6 +8,7 @@ import { PLAN_MAX_CHARS, linesToNotes, localIso } from "../shared/plan";
 import { REACTIONS } from "../shared/schema";
 import type { AdminAct, DeniedReason, NoteItem, PlanNote, PlanTrouble, ReactionKind } from "../shared/types";
 import { escapeHtml, type Board, type Tool } from "./app";
+import { deleteBoard, myBoards, nextBoard, setFlash } from "./boards";
 import { boardLink, forgetBoard, recentBoards } from "./identity";
 import type { LinkStatus } from "./net";
 import { reactionIcon } from "./people";
@@ -269,6 +270,7 @@ export class Chrome {
       this.closeMenus();
       if (act === "settings") this.settings();
       else if (act === "share") this.share();
+      else if (act === "manage") this.manageBoards();
     });
     $(".export").addEventListener("click", () => this.exportWeek());
     this.pill.addEventListener("click", () => board.tidy());
@@ -632,7 +634,7 @@ export class Chrome {
     this.closeMenus();
     if (open) return;
     const b = this.board;
-    const here = b.demo || b.access?.local ? null : b.id;
+    const here = !b.demo && b.access ? b.id : null;
     const when = (at: number) => new Date(at).toLocaleDateString(undefined, { day: "numeric", month: "short" });
     const others = recentBoards().filter((r) => r.id !== here);
     const title = boardTitle(b.state.meta);
@@ -641,6 +643,7 @@ export class Chrome {
       ${here ? `<div class="here" aria-current="page"><i style="--c:${b.me.color}"></i><span>${escapeHtml(title)}</span><small>Open now</small></div>` : ""}
       ${others.map((r) => `<a href="/b/${escapeHtml(r.id)}" role="menuitem"><span>${escapeHtml(r.title || "Untitled board")}</span><time>${when(r.at)}</time></a>`).join("")}
       ${!others.length ? `<p class="menu-empty">Other boards you open on this device show up here.</p>` : ""}
+      ${others.length || here ? `<button data-menu="manage" role="menuitem" class="act">${icon("check")}<span>Manage boards…</span></button>` : ""}
       <hr />
       <a href="/new?template=blank" role="menuitem" class="act">${icon("plus")}<span>New blank board</span></a>
       ${here ? `<button data-menu="settings" role="menuitem" class="act">${icon("gear")}<span>Board settings</span></button>` : ""}
@@ -1101,8 +1104,143 @@ export class Chrome {
       typed: "delete",
     });
     if (!ok) return;
+    this.board.deleting = `Deleted “${[m.client, m.file].filter(Boolean).join(" · ") || "the board"}”.`;
     const r = await this.ask("delete", () => this.board.link.admin("delete"));
-    if (!r.ok) this.toast(r.message ?? "That didn’t work.");
+    if (!r.ok) {
+      this.board.deleting = null;
+      this.toast(r.message ?? "That didn’t work.");
+    }
+  }
+
+  /** This tab deleted the board: go on to the board opened before it, or say it's gone if there's none. */
+  afterDelete(line: string) {
+    const next = nextBoard([this.board.id]);
+    if (next) {
+      setFlash(line);
+      location.assign(`/b/${next.id}`);
+      return;
+    }
+    this.showGate("deleted", { mine: line });
+  }
+
+  /**
+   * Manage boards: every board opened on this device, to delete several you
+   * own at once, or take any off this device's list.
+   */
+  manageBoards() {
+    const b = this.board;
+    this.closeMenus();
+    this.panel?.close();
+    const here = !b.demo && b.access ? b.id : null;
+    const d = this.dialog("", "manage-dialog");
+    const card = d.el.querySelector(".card")!;
+    const picked = new Set<string>();
+    let busy = false;
+    const when = (at: number) => new Date(at).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+    const ROLE = { owner: "Owner", editor: "Can edit", viewer: "Watching" } as const;
+    const draw = () => {
+      const list = myBoards();
+      for (const id of [...picked]) if (!list.some((r) => r.id === id)) picked.delete(id);
+      const chosen = list.filter((r) => picked.has(r.id));
+      const mine = chosen.filter((r) => r.mine);
+      const notMine = chosen.length - mine.length;
+      card.innerHTML = `
+        <h2>Your boards</h2>
+        <p class="muted">Every board opened on this device. Tick the ones to delete (you need to own them), or take them off this list.</p>
+        ${
+          list.length
+            ? `<div class="manage-head">
+                <label class="tick"><input type="checkbox" class="all" ${chosen.length === list.length ? "checked" : ""} /><span>Select all</span></label>
+                <span class="count">${chosen.length ? `${chosen.length} selected` : `${list.length} board${list.length === 1 ? "" : "s"}`}</span>
+              </div>
+              <ul class="manage-list">${list
+                .map(
+                  (r) => `<li class="${picked.has(r.id) ? "on" : ""}">
+                    <label class="tick"><input type="checkbox" value="${escapeHtml(r.id)}" ${picked.has(r.id) ? "checked" : ""} /><span class="name">${escapeHtml(r.title || "Untitled board")}</span></label>
+                    <span class="role ${r.role ?? ""}">${r.role ? ROLE[r.role] : ""}</span>
+                    ${r.id === here ? `<span class="here-tag">Open now</span>` : `<a class="open" href="/b/${escapeHtml(r.id)}">Open</a>`}
+                    <time>${when(r.at)}</time>
+                  </li>`,
+                )
+                .join("")}</ul>`
+            : `<p class="manage-empty">No boards on this device yet. Boards you start or open show up here.</p>`
+        }
+        <p class="fine manage-note">${
+          !notMine
+            ? "Taking a board off the list keeps it for everyone; you’ll need its link to open it again here."
+            : notMine === chosen.length
+              ? `You don’t own ${notMine === 1 ? "this board" : "these boards"}, so ${notMine === 1 ? "it" : "they"} can only be taken off this list.`
+              : `${notMine} of these ${notMine === 1 ? "isn’t" : "aren’t"} yours: Delete leaves ${notMine === 1 ? "it" : "them"} alone.`
+        }</p>
+        <div class="actions wrap">
+          <button class="btn ghost" data-act="forget" ${chosen.length && !busy ? "" : "disabled"}>Remove from this list</button>
+          <button class="btn danger" data-act="delete" ${mine.length && !busy ? "" : "disabled"}>${busy ? "Deleting…" : mine.length ? `Delete ${mine.length} board${mine.length === 1 ? "" : "s"}…` : "Delete…"}</button>
+          <button class="btn primary" data-close>Done</button>
+        </div>`;
+      card.querySelector("[data-close]")!.addEventListener("click", d.close);
+      const all = card.querySelector<HTMLInputElement>("input.all");
+      if (all) all.indeterminate = chosen.length > 0 && chosen.length < list.length;
+    };
+    draw();
+    card.addEventListener("change", (e) => {
+      const t = e.target as HTMLInputElement;
+      if (t.classList.contains("all")) {
+        for (const r of myBoards()) t.checked ? picked.add(r.id) : picked.delete(r.id);
+      } else if (t.value) {
+        t.checked ? picked.add(t.value) : picked.delete(t.value);
+      }
+      draw();
+    });
+    card.addEventListener("click", async (e) => {
+      const act = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-act]")?.dataset.act;
+      if (!act || busy) return;
+      const list = myBoards().filter((r) => picked.has(r.id));
+      const name = (r: { title: string }) => `“${escapeHtml(r.title || "Untitled board")}”`;
+      const names = (rs: { title: string }[]) => (rs.length <= 3 ? rs.map(name).join(", ") : `${rs.slice(0, 2).map(name).join(", ")} and ${rs.length - 2} more`);
+      if (act === "forget") {
+        for (const r of list) forgetBoard(r.id);
+        picked.clear();
+        this.toast(`Took ${list.length} board${list.length === 1 ? "" : "s"} off this list.`);
+        return draw();
+      }
+      const mine = list.filter((r) => r.mine);
+      const ok = await this.confirm({
+        title: `Delete ${mine.length} board${mine.length === 1 ? "" : "s"} for good?`,
+        body: `${names(mine)} and everything on ${mine.length === 1 ? "it" : "them"} are removed from the server. Their links stop working for everyone, right away. This can’t be undone.`,
+        yes: "Delete for good",
+        danger: true,
+        typed: "delete",
+      });
+      if (!ok) return;
+      busy = true;
+      draw();
+      // The board open here goes last: deleting it moves this tab on.
+      const others = mine.filter((r) => r.id !== here);
+      const results = await Promise.all(others.map((r) => deleteBoard(r.id)));
+      const failed = results.filter((r) => !r.ok);
+      const gone = results.length - failed.length;
+      busy = false;
+      for (const r of results) if (r.ok) picked.delete(r.id);
+      if (failed.length) {
+        const f = failed[0] as { id: string; why: string };
+        const t = mine.find((r) => r.id === f.id)?.title || "a board";
+        this.toast(`Couldn’t delete ${failed.length === 1 ? `“${t}”` : `${failed.length} boards`}: ${f.why}.`);
+      }
+      const doHere = here !== null && mine.some((r) => r.id === here) && !failed.length;
+      if (doHere) {
+        const total = gone + 1;
+        b.deleting = total === 1 ? `Deleted “${mine.find((r) => r.id === here)!.title || "the board"}”.` : `Deleted ${total} boards.`;
+        d.close();
+        const r = await this.ask("delete", () => b.link.admin("delete"));
+        if (!r.ok) {
+          b.deleting = null;
+          this.toast(r.message ?? "That didn’t work.");
+        }
+        return;
+      }
+      if (gone) this.toast(`Deleted ${gone} board${gone === 1 ? "" : "s"}.`);
+      draw();
+    });
   }
 
   private async forgetDialog() {
@@ -1137,7 +1275,7 @@ export class Chrome {
 
   // ------------------------------------------------------------------ gate
   /** The screen in front of the board: its password, or why it won’t open. */
-  showGate(kind: "locked" | DeniedReason, info: { wrong?: boolean; wait?: number; at?: string; changed?: boolean } = {}) {
+  showGate(kind: "locked" | DeniedReason, info: { wrong?: boolean; wait?: number; at?: string; changed?: boolean; mine?: string } = {}) {
     const g = this.gate;
     const b = this.board;
     this.closeMenus();
@@ -1149,19 +1287,37 @@ export class Chrome {
     if (kind !== "locked") {
       const when = info.at ? new Date(info.at) : null;
       const on = when && !Number.isNaN(+when) ? ` on ${when.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", year: "numeric" })}` : "";
-      const [title, body] = {
-        missing: ["There’s no board at this link", "Check the whole link was copied, or ask whoever sent it for a fresh one."],
-        link: ["This link doesn’t open the board any more", "Its owner made new links, or this one was copied wrong. Ask them for the current link."],
-        deleted: ["This board was deleted", `Its owner deleted it${on}, with everything on it. Nothing of it is kept.`],
-      }[kind];
+      const [title, body] = info.mine
+        ? [info.mine, "It’s gone for everyone, with everything on it, and its links no longer work."]
+        : {
+            missing: ["There’s no board at this link", "Check the whole link was copied, or ask whoever sent it for a fresh one."],
+            link: ["This link doesn’t open the board any more", "Its owner made new links, or this one was copied wrong. Ask them for the current link."],
+            deleted: ["This board was deleted", `Its owner deleted it${on}, with everything on it. Nothing of it is kept.`],
+          }[kind];
+      // Your other boards, so the next step is one click: open one, or manage them all.
+      const mine = recentBoards().filter((r) => r.id !== b.id);
+      const day = (at: number) => new Date(at).toLocaleDateString(undefined, { day: "numeric", month: "short" });
       g.dataset.kind = kind;
       g.innerHTML = `
         <div class="gate-card" role="alert">
           <div class="gate-icon">${icon(kind === "deleted" ? "trash" : "link")}</div>
-          <h1>${title}</h1>
+          <h1>${escapeHtml(title)}</h1>
           <p>${body}</p>
-          <div class="actions"><a class="btn primary" href="/new?template=blank">Start a new board</a><a class="btn ghost" href="/">Watch the demo</a></div>
+          ${
+            mine.length
+              ? `<div class="gate-boards">
+                  <div class="gate-boards-head"><span>Your boards</span><button class="link-btn" data-gate="manage">Manage boards</button></div>
+                  ${mine
+                    .slice(0, 6)
+                    .map((r) => `<a href="/b/${escapeHtml(r.id)}"><span>${escapeHtml(r.title || "Untitled board")}</span><time>${day(r.at)}</time></a>`)
+                    .join("")}
+                  ${mine.length > 6 ? `<button class="link-btn more" data-gate="manage">All ${mine.length} boards…</button>` : ""}
+                </div>`
+              : ""
+          }
+          <div class="actions"><a class="btn ${mine.length ? "ghost" : "primary"}" href="/new?template=blank">Start a new board</a><a class="btn ghost" href="/">Watch the demo</a></div>
         </div>`;
+      g.querySelectorAll("[data-gate='manage']").forEach((x) => x.addEventListener("click", () => this.manageBoards()));
       return;
     }
     let form = g.querySelector<HTMLFormElement>("form.unlock");

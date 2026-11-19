@@ -260,6 +260,7 @@ export class BoardRoom extends DurableObject<Env> {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname.endsWith("/snapshot")) return this.snapshot(request);
+    if (url.pathname.endsWith("/delete")) return this.deleteByOwner(request);
     const cal = /^\/api\/boards\/([a-z0-9]+)\/cal\/([a-z0-9]+)\.ics$/.exec(url.pathname);
     if (cal) return this.calendar(cal[1], cal[2], url.searchParams.get("tz"), url.searchParams.get("who"));
     const mcp = /^\/api\/boards\/([a-z0-9]+)\/mcp\/([a-z0-9]+)$/.exec(url.pathname);
@@ -283,6 +284,22 @@ export class BoardRoom extends DurableObject<Env> {
       return Response.json({ error: "This board has a password" }, { status: 401 });
     }
     return Response.json({ meta: this.state.meta, items: this.state.list() }, { headers: { "cache-control": "no-store" } });
+  }
+
+  /**
+   * Delete the board with its owner key, sent as a header: how "Manage
+   * boards" deletes several at once without opening each one. The same as
+   * Delete in Board settings: everyone on it is told, its links stop working.
+   */
+  private async deleteByOwner(request: Request): Promise<Response> {
+    const headers = { "cache-control": "no-store" };
+    if (request.method !== "POST") return Response.json({ error: "Use POST" }, { status: 405, headers: { ...headers, allow: "POST" } });
+    if (this.deletedAt) return Response.json({ error: "gone", at: this.deletedAt }, { status: 410, headers });
+    if (!this.seeded || !this.lock) return Response.json({ error: "No such board" }, { status: 404, headers });
+    const role = await roleFor(this.lock, null, request.headers.get("x-longtable-owner"));
+    if (role !== "owner") return Response.json({ error: "Only the board’s owner can delete it" }, { status: 403, headers });
+    const at = await this.destroy();
+    return Response.json({ ok: true, at }, { headers });
   }
 
   /**
@@ -677,7 +694,11 @@ export class BoardRoom extends DurableObject<Env> {
       return done(act, true);
     }
 
-    // Delete: everything goes, and the room keeps only the date it went.
+    await this.destroy(() => done(act, true));
+  }
+
+  /** Delete the board: everything goes, the room keeps only the date it went, and everyone on it is told. */
+  private async destroy(first?: () => void): Promise<string> {
     if (this.flushTimer) clearTimeout(this.flushTimer);
     this.flushTimer = null;
     this.dirty.clear();
@@ -687,8 +708,9 @@ export class BoardRoom extends DurableObject<Env> {
     this.load();
     this.ctx.storage.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('deleted', ?)", at);
     this.presence.clear();
-    done(act, true);
+    first?.();
     for (const s of this.ctx.getWebSockets()) this.deny(s, "deleted", at);
+    return at;
   }
 
   /** Tell everyone in the room what their access is now. */

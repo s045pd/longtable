@@ -14,6 +14,7 @@ import { Camera, type Insets } from "./camera";
 import { Chrome } from "./chrome";
 import { measureLabel, resetFits } from "./fit";
 import { Grid } from "./grid";
+import { takeFlash } from "./boards";
 import { boardLink, forgetBoard, loadIdentity, putCarry, rememberBoard, saveIdentity, saveKeys, takeCarry, deviceId, type Identity } from "./identity";
 import { attachInput } from "./input";
 import { DemoLink, LiveLink, LocalLink, type BoardKeys, type InitData, type Link, type LinkStatus } from "./net";
@@ -48,6 +49,8 @@ export class Board {
   chrome!: Chrome;
   editor!: Editor;
   sampleTeam!: SampleTeam;
+  /** While this tab deletes the board: the line to show after (on the next board, or the deleted screen). */
+  deleting: string | null = null;
   /** Set on the demo board (/demo), which plays the whole story by itself. */
   demo: Demo | null = null;
   /** What you may do here, and the links you may hand on; null until the board opens. */
@@ -203,9 +206,12 @@ export class Board {
       for (let i = 0; i < carry.items.length; i += 300) this.commit(carry.items.slice(i, i + 300).map((item) => ({ op: "put", item }) as Op), { history: false });
       this.commit([{ op: "meta", set: carry.meta }], { history: false });
     }
-    rememberBoard(this.id, [this.state.meta.client, this.state.meta.file].filter(Boolean).join(" · "));
+    rememberBoard(this.id, [this.state.meta.client, this.state.meta.file].filter(Boolean).join(" · "), d.access.role);
     if (this.firstInit) {
       this.firstInit = false;
+      // "Deleted “Launch party”." when deleting a board brought you here.
+      const flash = takeFlash();
+      if (flash) this.chrome.toast(flash);
       this.fitAll(false);
       if (carry?.share) this.chrome.share();
       if (!loadIdentity()?.name) this.chrome.askName(this.suggestColor());
@@ -240,6 +246,8 @@ export class Board {
     this.sampleTeam.stop();
     forgetBoard(this.id);
     this.wipe();
+    // You deleted it: straight on to your next board, or the deleted screen saying so.
+    if (why === "deleted" && this.deleting !== null) return this.chrome.afterDelete(this.deleting);
     this.chrome.showGate(why, { at });
   }
 

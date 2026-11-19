@@ -51,12 +51,12 @@ export default {
       return json({ id, ...keys }, 201);
     }
 
-    const m = /^\/api\/boards\/([a-z0-9]+)\/(ws|snapshot|cal\/[a-z0-9]{26}\.ics|mcp\/[a-z0-9]{26})$/.exec(path);
+    const m = /^\/api\/boards\/([a-z0-9]+)\/(ws|snapshot|delete|cal\/[a-z0-9]{26}\.ics|mcp\/[a-z0-9]{26})$/.exec(path);
     if (m) {
       if (!BOARD_ID.test(m[1])) return json({ error: "No such board" }, 404);
       // Only this site's pages may open a board's socket.
       const origin = request.headers.get("Origin");
-      if (m[2] === "ws" && origin && origin !== url.origin) return json({ error: "Wrong origin" }, 403);
+      if ((m[2] === "ws" || m[2] === "delete") && origin && origin !== url.origin) return json({ error: "Wrong origin" }, 403);
       const room = env.BOARDS.get(env.BOARDS.idFromName(m[1]));
       return room.fetch(request);
     }

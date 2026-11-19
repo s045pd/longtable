@@ -193,7 +193,10 @@ Whoever starts a board owns it. Under **Settings** in the top bar the owner can:
   to the password screen.
 - **make new links.** The old ones stop working at once.
 - **clear the board** (Undo brings it back) or **delete it** from the server
-  for good.
+  for good. You go straight on to the board you had open before it.
+
+**Your boards → Manage boards** deletes several boards you own at once, or
+takes boards off this device's list without touching them.
 
 | | How |
 | --- | --- |
