@@ -11,16 +11,29 @@ import { DurableObject } from "cloudflare:workers";
 import { LIMITS, cleanColor, cleanCoord, cleanEffect, cleanName, cleanOp, cleanPresence, cleanReaction } from "../src/shared/schema";
 import { BoardState } from "../src/shared/state";
 import { TEMPLATES, makeTemplate, type TemplateName } from "../src/shared/templates";
-import type { AdminAct, ClientMessage, DeniedReason, Item, Meta, Op, Person, Presence, Role, ServerMessage } from "../src/shared/types";
+import type { AdminAct, ClientMessage, DeniedReason, Item, Meta, Op, Person, PlanNote, PlanTrouble, Presence, Role, ServerMessage } from "../src/shared/types";
 import { newKey, randomId } from "../src/shared/ids";
-import { FORGET_TRIES_MS, PASSWORD_MAX, PASSWORD_MIN, Tries, accessFor, addressKey, checkPassword, hashPassword, newLock, roleFor, same, sha256, type Lock, type TryRecord, type TryStore } from "./access";
+import { FORGET_TRIES_MS, PASSWORD_MAX, PASSWORD_MIN, Tries, accessFor, addressKey, checkPassword, cleanZone, hashPassword, newLock, roleFor, same, sha256, type Lock, type TryRecord, type TryStore } from "./access";
+import { fileStem, toIcs } from "../src/shared/exporter";
+import { PLAN_MAX_CHARS, planMessages, readPlan } from "../src/shared/plan";
 
 export interface Env {
   BOARDS: DurableObjectNamespace<BoardRoom>;
   ASSETS: Fetcher;
   /** When set, starting a board needs this password (see DEPLOY.md). */
   CREATE_PASSWORD?: string;
+  /** Workers AI, which reads a pasted chat into notes. Missing in `wrangler dev --local`: boards then read the chat line by line. */
+  AI?: { run(model: string, input: unknown): Promise<unknown> };
+  /** The Workers AI model for reading chats, if not the default. */
+  AI_MODEL?: string;
 }
+
+/** Good at Chinese and English, and cheap: a group chat costs 40 to 80 neurons, so the free plan's 10,000 a day read 150 or more. */
+export const DEFAULT_AI_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8";
+/** Chats one address may have read on one board in an hour, so nobody spends the day's free AI alone. */
+const PLANS_PER_HOUR = 20;
+/** How long the model may take; it thinks first, which for a long chat can be most of a minute. */
+const PLAN_TIMEOUT_MS = 100_000;
 
 interface Attachment {
   pid: string;
@@ -90,6 +103,8 @@ export class BoardRoom extends DurableObject<Env> {
   private tries!: Tries;
   /** Sockets whose hello is being checked: a second hello meanwhile only renames. */
   private checking = new Set<string>();
+  /** Sockets with a chat being read; one at a time each. */
+  private planning = new Set<string>();
 
   /** When the board last wrote its "touched" time (once a minute is plenty). */
   private touchedAt = 0;
@@ -200,19 +215,30 @@ export class BoardRoom extends DurableObject<Env> {
       }
       this.tries.clear(who);
     }
+    const wait = this.count("started", who, BOARDS_PER_HOUR);
+    return wait ? { ok: false, why: "busy", wait } : { ok: true };
+  }
+
+  /**
+   * Count one more of something an address may do `limit` times an hour.
+   * Returns 0 and counts it when it is allowed, or the seconds to wait.
+   */
+  private count(table: "started" | "plans", who: string, limit: number): number {
     const sql = this.ctx.storage.sql;
-    sql.exec("CREATE TABLE IF NOT EXISTS started (who TEXT PRIMARY KEY, n INTEGER NOT NULL, since INTEGER NOT NULL)");
     const now = Date.now();
-    sql.exec("DELETE FROM started WHERE since < ?", now - 3600_000);
-    const row = sql.exec<{ n: number; since: number }>("SELECT n, since FROM started WHERE who = ?", who).toArray()[0];
-    if (row && row.n >= BOARDS_PER_HOUR) return { ok: false, why: "busy", wait: Math.ceil((row.since + 3600_000 - now) / 1000) };
-    sql.exec("INSERT OR REPLACE INTO started (who, n, since) VALUES (?, ?, ?)", who, (row?.n ?? 0) + 1, row?.since ?? now);
-    return { ok: true };
+    sql.exec(`CREATE TABLE IF NOT EXISTS ${table} (who TEXT PRIMARY KEY, n INTEGER NOT NULL, since INTEGER NOT NULL)`);
+    sql.exec(`DELETE FROM ${table} WHERE since < ?`, now - 3600_000);
+    const row = sql.exec<{ n: number; since: number }>(`SELECT n, since FROM ${table} WHERE who = ?`, who).toArray()[0];
+    if (row && row.n >= limit) return Math.max(1, Math.ceil((row.since + 3600_000 - now) / 1000));
+    sql.exec(`INSERT OR REPLACE INTO ${table} (who, n, since) VALUES (?, ?, ?)`, who, (row?.n ?? 0) + 1, row?.since ?? now);
+    return 0;
   }
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname.endsWith("/snapshot")) return this.snapshot(request);
+    const cal = /^\/api\/boards\/([a-z0-9]+)\/cal\/([a-z0-9]+)\.ics$/.exec(url.pathname);
+    if (cal) return this.calendar(cal[1], cal[2], url.searchParams.get("tz"));
     if (request.headers.get("Upgrade") !== "websocket") return new Response("Expected a WebSocket", { status: 426 });
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
@@ -232,6 +258,22 @@ export class BoardRoom extends DurableObject<Env> {
       return Response.json({ error: "This board has a password" }, { status: 401 });
     }
     return Response.json({ meta: this.state.meta, items: this.state.list() }, { headers: { "cache-control": "no-store" } });
+  }
+
+  /**
+   * The board's week as a calendar feed, for Google, Apple or Outlook
+   * calendars to subscribe to. Its own key, in the address (calendar apps
+   * can't keep one after a #), opens only this: no edits, no live board.
+   * New links or a new password give the board a new one.
+   */
+  private calendar(boardId: string, key: string, tz: string | null): Response {
+    const headers = { "cache-control": "no-cache", "x-content-type-options": "nosniff", "x-robots-tag": "noindex, nofollow", "referrer-policy": "no-referrer" };
+    if (this.deletedAt) return new Response("This board was deleted.\n", { status: 410, headers });
+    if (!this.seeded || !this.lock?.cal || !same(key, this.lock.cal)) return new Response("No such calendar.\n", { status: 404, headers });
+    const meta = this.state.meta;
+    return new Response(toIcs(meta, this.state.list(), boardId, new Date(), { tz: cleanZone(tz) }), {
+      headers: { ...headers, "content-type": "text/calendar; charset=utf-8", "content-disposition": `inline; filename="${fileStem(meta)}.ics"` },
+    });
   }
 
   private send(ws: WebSocket, msg: ServerMessage) {
@@ -336,11 +378,53 @@ export class BoardRoom extends DurableObject<Env> {
       this.broadcast({ t: "pres", pid: me.pid, p }, ws);
       return;
     }
+    if (msg.t === "plan") return this.plan(ws, me, msg);
     if (msg.t === "react") {
       const kind = cleanReaction(msg.kind);
       const x = cleanCoord(msg.x);
       const y = cleanCoord(msg.y);
       if (kind && x !== undefined && y !== undefined) this.broadcast({ t: "react", pid: me.pid, kind, x, y }, ws);
+    }
+  }
+
+  // --------------------------------------------------------- reading a chat
+  /**
+   * Read a pasted chat into notes with Workers AI and send them back to the
+   * one who asked; they look them over and add them as ordinary notes. The
+   * chat itself is never stored or logged.
+   */
+  private async plan(ws: WebSocket, me: Attachment, msg: Extract<ClientMessage, { t: "plan" }>) {
+    const reply = (r: { ok: true; notes: PlanNote[] } | { ok: false; why: PlanTrouble; wait?: number }) => this.send(ws, { t: "plan", ...r });
+    if (me.role === "viewer") return reply({ ok: false, why: "view" });
+    if (this.planning.has(me.pid)) return;
+    const text = typeof msg.text === "string" ? msg.text.trim().slice(0, PLAN_MAX_CHARS) : "";
+    if (!text) return reply({ ok: false, why: "empty" });
+    if (!this.env.AI) return reply({ ok: false, why: "off" });
+    const wait = this.count("plans", me.ip, PLANS_PER_HOUR);
+    if (wait) return reply({ ok: false, why: "busy", wait });
+    this.planning.add(me.pid);
+    try {
+      const today = typeof msg.today === "string" && /^\d{4}-\d{2}-\d{2}$/.test(msg.today) ? msg.today : new Date().toISOString().slice(0, 10);
+      const ask = this.env.AI.run(this.env.AI_MODEL || DEFAULT_AI_MODEL, {
+        messages: planMessages(text, this.state.meta.weekOf, today),
+        max_tokens: 6000,
+        temperature: 0.2,
+      });
+      const raw = await Promise.race([ask, new Promise((_, no) => setTimeout(() => no(new Error("timed out")), PLAN_TIMEOUT_MS))]);
+      // How much of the day's free Workers AI it used: counts only, never the words.
+      const usage = (raw as { usage?: unknown } | null)?.usage;
+      if (usage) console.log("plan: tokens", JSON.stringify(usage));
+      const notes = readPlan(raw);
+      if (notes === null) return reply({ ok: false, why: "failed" });
+      reply(notes.length ? { ok: true, notes } : { ok: false, why: "empty" });
+    } catch (e) {
+      const message = String((e as Error)?.message ?? e);
+      // Only the error, never the chat.
+      if (!/run remotely|not supported/i.test(message)) console.warn("plan: Workers AI failed:", message.slice(0, 300));
+      // `wrangler dev --local` has the binding but can't run it: that is AI being off.
+      reply({ ok: false, why: /4006|neuron|daily free|allocation/i.test(message) ? "spent" : /run remotely|not supported/i.test(message) ? "off" : "failed" });
+    } finally {
+      this.planning.delete(me.pid);
     }
   }
 
@@ -379,6 +463,11 @@ export class BoardRoom extends DurableObject<Env> {
     }
     const role = handOver ? "owner" : await roleFor(this.lock, msg.key, msg.owner);
     if (!role) return this.deny(ws, "link");
+    // A board from before calendar feeds gets its feed key now.
+    if (!this.lock.cal) {
+      this.lock.cal = newKey();
+      this.saveLock();
+    }
     // A rename may have come in while the keys were checked.
     const latest = ws.deserializeAttachment() as Attachment | null;
     if (latest) Object.assign(me, { name: latest.name, color: latest.color });
@@ -473,6 +562,8 @@ export class BoardRoom extends DurableObject<Env> {
         }
         this.lock.pw = await hashPassword(pw);
         this.lock.pass = newKey();
+        // Calendars subscribed before the new password stop getting the week.
+        this.lock.cal = newKey();
         this.saveLock();
         // Everyone but the owners has to give the new password.
         for (const s of others()) {
@@ -490,6 +581,7 @@ export class BoardRoom extends DurableObject<Env> {
     if (act === "links") {
       this.lock.edit = newKey();
       this.lock.view = newKey();
+      this.lock.cal = newKey();
       this.saveLock();
       for (const s of others()) this.deny(s, "link");
       this.tellAccess();

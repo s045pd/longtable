@@ -25,8 +25,11 @@ public, with credit if you'd like it.
   owner link.
 - Getting past a board's password, the wait after wrong tries, or a
   deployment's team password.
+- Reading a board's calendar feed without its calendar link, or with one
+  that new links or a new password switched off.
 - Anything that leaks a board's keys, a password or a pass to the server's
-  logs, another site or another person.
+  logs, another site or another person, or keeps a pasted chat after it has
+  been read.
 - Cross-site scripting or other ways to run code in someone's board.
 
 Running out a deployment's free Cloudflare quota on purpose is a known limit

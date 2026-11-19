@@ -1669,7 +1669,10 @@ a.btn {
   width: auto !important;
 }
 .export-dialog .card {
-  width: min(560px, 100%);
+  width: min(600px, 100%);
+}
+.export-dialog .preview {
+  max-height: 24dvh;
 }
 .preview {
   max-height: 34dvh;
@@ -1693,8 +1696,7 @@ a.btn {
   }
   .names .client,
   .names .slash,
-  .topbar .btn span,
-  .topbar .export {
+  .topbar .btn span {
     display: none;
   }
   .names .file {
@@ -2338,6 +2340,7 @@ a.btn {
 .view-only .toolbar .tool[data-tool="pen"],
 .view-only .toolbar .tool[data-tool="text"],
 .view-only .toolbar .tool[data-tool="check"],
+.view-only .toolbar .plan,
 .view-only .toolbar .undo,
 .view-only .toolbar .redo,
 .view-only .toolbar .sep.desk,
@@ -2508,4 +2511,176 @@ a.btn {
     font-size: 12.5px;
     animation: none;
   }
+}
+
+/* ------------------------------------------------------- a chat into a plan */
+.empty-hint p + p + p {
+  margin-top: 6px;
+}
+.plan-dialog .card {
+  width: min(600px, 100%);
+}
+.plan-form textarea {
+  display: block;
+  width: 100%;
+  min-height: 190px;
+  max-height: 46dvh;
+  resize: vertical;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--raise);
+  border: 1px solid #33353f;
+  outline: none;
+  color: var(--chalk);
+  font: 14px/1.5 var(--sans);
+}
+.plan-form textarea:focus {
+  border-color: var(--chalk);
+}
+.plan-form textarea::placeholder {
+  color: var(--dim);
+}
+.plan-form textarea:disabled {
+  opacity: 0.6;
+}
+.dialog .fine {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.plan-why {
+  margin: 4px 0 14px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #2e2a1f;
+  color: #f1dca6;
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+.plan-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  max-height: 44dvh;
+  overflow: auto;
+  border-radius: 12px;
+  background: var(--raise);
+}
+.plan-list label {
+  display: grid;
+  grid-template-columns: 18px 112px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+}
+.plan-list label:hover {
+  background: var(--hover);
+}
+.plan-list .when {
+  white-space: nowrap;
+  font: 600 11px/1.2 var(--mono);
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+.plan-list .what {
+  color: var(--chalk);
+  overflow-wrap: anywhere;
+}
+.plan-list .who {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #33353f;
+  color: #cfd1d8;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.plan-list input:not(:checked) ~ span {
+  opacity: 0.4;
+}
+.check-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  color: var(--chalk);
+  font-size: 14px;
+  cursor: pointer;
+}
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-right: 8px;
+  vertical-align: -2px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (max-width: 520px) {
+  .plan-list label {
+    grid-template-columns: 18px 1fr auto;
+  }
+  .plan-list .when {
+    grid-column: 2 / -1;
+    grid-row: 1;
+  }
+  .plan-list .what {
+    grid-column: 2;
+  }
+}
+
+/* ------------------------------------------------------- in your calendar */
+.subscribe {
+  margin: 4px 0 18px;
+  padding: 14px;
+  border-radius: 14px;
+  background: var(--raise);
+}
+.sub-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.sub-head svg {
+  flex: none;
+  stroke: var(--chalk);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  margin-top: 1px;
+}
+.sub-head b {
+  display: block;
+  color: var(--chalk);
+  font-size: 15px;
+}
+.sub-head span {
+  color: #b9bcc6;
+  font-size: 13.5px;
+}
+.cal-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.cal-row .btn {
+  height: 38px;
+  font-size: 13.5px;
+  text-decoration: none;
+}
+.cal-row .btn svg {
+  width: 16px;
+  height: 16px;
 }

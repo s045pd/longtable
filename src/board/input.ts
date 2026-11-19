@@ -1,6 +1,7 @@
 // Pointer, touch and keyboard. One gesture at a time: pan, pinch, marquee,
 // drag, or draw. A press only becomes a drag after it has moved a few
 // pixels, so a click stays a click.
+import { looksLikeAChat } from "../shared/plan";
 import { planDrop } from "../shared/tidy";
 import type { Item, Op } from "../shared/types";
 import type { Board } from "./app";
@@ -493,12 +494,14 @@ export function attachInput(board: Board) {
     board.root.classList.remove("space");
   });
 
-  // Paste plain text: one note per line (up to 30), laid out in a row.
+  // Paste plain text: one note per line (up to 30), laid out in a row. A
+  // longer paste reads like a chat: it opens "Turn a chat into a plan".
   addEventListener("paste", (e) => {
-    if (typing() || board.demo?.playing || board.readOnly) return;
+    if (typing() || board.demo?.playing || board.readOnly || board.root.querySelector(".dialog.open")) return;
     const text = e.clipboardData?.getData("text/plain")?.trim();
     if (!text) return;
     e.preventDefault();
+    if (looksLikeAChat(text)) return board.chrome.planDialog(text);
     const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).slice(0, 30);
     const [cx, cy] = board.pointer ?? board.cam.toWorld(board.cam.w / 2, board.cam.h / 2);
     let z = board.topZ();

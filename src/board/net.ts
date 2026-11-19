@@ -2,7 +2,7 @@
 // Worker over a WebSocket and reconnects on its own; LocalLink keeps the board
 // on this device (localStorage) and shares it between tabs, which is what
 // `npm run dev` uses when no Worker is running.
-import type { Access, AdminAct, DeniedReason, Effect, Item, Meta, Op, Person, Presence, ReactionKind, ServerMessage } from "../shared/types";
+import type { Access, AdminAct, DeniedReason, Effect, Item, Meta, Op, Person, PlanNote, PlanTrouble, Presence, ReactionKind, ServerMessage } from "../shared/types";
 import { BoardState } from "../shared/state";
 import { makeTemplate, type TemplateName } from "../shared/templates";
 import { randomId } from "../shared/ids";
@@ -45,8 +45,13 @@ export interface LinkEvents {
   done(act: AdminAct, ok: boolean, message?: string): void;
 }
 
+/** What reading a chat gave: notes, or why there are none. */
+export type PlanReply = { ok: true; notes: PlanNote[] } | { ok: false; why: PlanTrouble; wait?: number };
+
 export interface Link {
   hello(name: string, color: string, cid: string): void;
+  /** Ask the room to read a chat into notes (Workers AI). */
+  plan(text: string, today: string): Promise<PlanReply>;
   ops(ops: Op[], fx?: Effect): void;
   presence(p: Presence): void;
   react(kind: ReactionKind, x: number, y: number): void;
@@ -118,6 +123,8 @@ export class LiveLink implements Link {
     };
     ws.onclose = () => {
       clearInterval(this.ping);
+      // A chat being read is lost with the socket.
+      this.planWaiting?.({ ok: false, why: "failed" });
       if (this.ws !== ws || this.closed) return;
       this.ws = null;
       this.setStatus(this.retries > 1 ? "offline" : "connecting");
@@ -161,6 +168,12 @@ export class LiveLink implements Link {
       case "done":
         this.events.done(msg.act, msg.ok, msg.message);
         break;
+      case "plan": {
+        const answer = this.planWaiting;
+        this.planWaiting = null;
+        answer?.(msg.ok ? { ok: true, notes: msg.notes } : { ok: false, why: msg.why, ...(msg.wait ? { wait: msg.wait } : {}) });
+        break;
+      }
       case "init": {
         this.learn(msg.access);
         const pending = [...this.pending.values()];
@@ -207,6 +220,22 @@ export class LiveLink implements Link {
 
   unlock(pw: string) {
     if (!this.raw({ t: "unlock", pw })) this.events.locked({ wrong: false });
+  }
+
+  private planWaiting: ((r: PlanReply) => void) | null = null;
+
+  plan(text: string, today: string): Promise<PlanReply> {
+    this.planWaiting?.({ ok: false, why: "failed" });
+    return new Promise((resolve) => {
+      const timer = window.setTimeout(() => done({ ok: false, why: "failed" }), 115_000);
+      const done = (r: PlanReply) => {
+        clearTimeout(timer);
+        if (this.planWaiting === done) this.planWaiting = null;
+        resolve(r);
+      };
+      this.planWaiting = done;
+      if (this.status !== "online" || !this.raw({ t: "plan", text, today })) done({ ok: false, why: "failed" });
+    });
   }
 
   admin(act: "password" | "links" | "delete", pw?: string | null) {
@@ -360,6 +389,11 @@ export class LocalLink implements Link {
 
   unlock() {}
 
+  /** No room, so no Workers AI: the board reads the chat line by line. */
+  plan(): Promise<PlanReply> {
+    return Promise.resolve({ ok: false, why: "off" });
+  }
+
   /** A board in this browser has no links or password to manage; deleting it clears it from this browser. */
   admin(act: AdminAct) {
     if (act !== "delete") return this.events.done(act, false, "Passwords and new links need a deployed Longtable (npm run dev:worker).");
@@ -398,5 +432,8 @@ export class DemoLink implements Link {
   react() {}
   unlock() {}
   admin() {}
+  plan(): Promise<PlanReply> {
+    return Promise.resolve({ ok: false, why: "off" });
+  }
   close() {}
 }

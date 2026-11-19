@@ -9,7 +9,7 @@ import { randomId } from "../shared/ids";
 import { BoardState } from "../shared/state";
 import { FLIGHT, notesInWeek, planTidy, waveDelay } from "../shared/tidy";
 import type { TemplateName } from "../shared/templates";
-import type { Access, AdminAct, DeniedReason, Effect, Item, NoteItem, Op, Person, Presence, ReactionKind } from "../shared/types";
+import type { Access, AdminAct, DeniedReason, Effect, Item, NoteItem, Op, Person, PlanNote, Presence, ReactionKind } from "../shared/types";
 import { Camera, type Insets } from "./camera";
 import { Chrome } from "./chrome";
 import { measureLabel, resetFits } from "./fit";
@@ -588,6 +588,55 @@ export class Board {
     const at = this.pointer ?? this.cam.toWorld(this.cam.w / 2, this.cam.h / 2);
     this.people.react(kind, at[0], at[1], this.me.color);
     this.link.react(kind, at[0], at[1]);
+  }
+
+  /**
+   * Notes read from a pasted chat, laid out where you are looking: one colour
+   * for each person they fall to. With `tidy`, they go straight into the week.
+   */
+  addNotes(notes: PlanNote[], opts: { tidy?: boolean } = {}) {
+    if (this.readOnly && !this.demo) return this.chrome.viewOnly();
+    const list = notes.slice(0, 40);
+    if (!list.length) return;
+    this.editor.commit();
+    const [cx, cy] = this.cam.toWorld(this.cam.w / 2, this.cam.h / 2);
+    const cols = Math.min(6, list.length);
+    const rows = Math.ceil(list.length / cols);
+    const mine = Math.max(0, PALETTE.indexOf(this.me.color));
+    const colors = new Map<string, string>();
+    const colorFor = (who: string | null) => {
+      if (!who) return this.me.color;
+      const k = who.toLowerCase();
+      if (!colors.has(k)) colors.set(k, PALETTE[(mine + 1 + colors.size) % PALETTE.length]);
+      return colors.get(k)!;
+    };
+    let z = this.topZ();
+    const ops: Op[] = list.map((n, i) => ({
+      op: "put",
+      item: {
+        id: this.newItemId(),
+        type: "note",
+        x: Math.round(cx + (i % cols) * 232 - (cols - 1) * 116 - 100),
+        y: Math.round(cy + Math.floor(i / cols) * 224 - (rows - 1) * 112 - 100),
+        rot: Math.round((Math.random() * 6 - 3) * 10) / 10,
+        z: z++,
+        by: this.me.name,
+        color: colorFor(n.who),
+        text: (n.who ? `${n.text} @${n.who}` : n.text).slice(0, 400),
+        ...(n.day !== null ? { day: n.day } : {}),
+        ...(n.time !== null ? { time: n.time } : {}),
+      },
+    }));
+    this.commit(ops);
+    const ids = ops.map((op) => (op.op === "put" ? op.item.id : ""));
+    if (opts.tidy) {
+      this.setSelection([]);
+      this.tidy();
+      return;
+    }
+    this.setSelection(ids);
+    const box = union(ids.map((id) => bounds(this.state.items.get(id)!)));
+    if (box) this.cam.glideTo(this.cam.fitView(box, this.insets(), 1), 600);
   }
 
   /** Tidy the selection, or the whole board when nothing is selected. */

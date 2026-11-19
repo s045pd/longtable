@@ -106,13 +106,26 @@ function fold(line: string): string {
   return parts.join("\r\n ");
 }
 
+/** For a calendar app that subscribes: how often to look again, and the time zone the times are in. */
+export interface FeedOptions {
+  /** An IANA time zone ("Asia/Tokyo") for the calendar's floating times; Google reads it, Apple and Outlook use the device's own. */
+  tz?: string;
+}
+
 /**
- * A calendar file with one event per note that names a day. Times are local
+ * A calendar with one event per note that names a day. Times are local
  * ("floating"), so they mean the same wall-clock time wherever it is opened.
+ * Each event keeps its note's id, so a calendar that subscribes to the feed
+ * moves and renames events as the board changes instead of adding new ones.
  */
-export function toIcs(meta: Meta, items: Item[], boardId: string, now = new Date()): string {
+export function toIcs(meta: Meta, items: Item[], boardId: string, now = new Date(), feed?: FeedOptions): string {
   const stamp = now.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
-  const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Longtable//Week export//EN", "CALSCALE:GREGORIAN", `X-WR-CALNAME:${icsText(boardTitle(meta))}`];
+  const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", `PRODID:-//Longtable//${feed ? "Week feed" : "Week export"}//EN`, "CALSCALE:GREGORIAN", `X-WR-CALNAME:${icsText(boardTitle(meta))}`];
+  if (feed) {
+    lines.push("METHOD:PUBLISH", `X-WR-CALDESC:${icsText(`The week on the Longtable board ${boardTitle(meta)}. It follows the board as it changes.`)}`);
+    lines.push("REFRESH-INTERVAL;VALUE=DURATION:PT1H", "X-PUBLISHED-TTL:PT1H");
+    if (feed.tz) lines.push(`X-WR-TIMEZONE:${feed.tz}`);
+  }
   for (const e of weekEntries(items)) {
     if (e.day === null || !meta.weekOf) continue;
     const date = dateOf(meta.weekOf, e.day);

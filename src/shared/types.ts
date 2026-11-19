@@ -128,6 +128,8 @@ export interface Access {
   edit?: string;
   /** The key of the watch-only link. */
   view: string;
+  /** The key of the board's calendar feed (read-only, for calendar apps to subscribe to). */
+  cal?: string;
   /**
    * The owner key, sent once: when a board made before boards had keys is
    * first opened, whoever opens it becomes its owner.
@@ -142,6 +144,21 @@ export type DeniedReason = "missing" | "link" | "deleted";
 
 /** The owner's controls. */
 export type AdminAct = "password" | "links" | "delete";
+
+/** One note read out of a pasted chat. */
+export interface PlanNote {
+  /** What to do, short, in the chat's own language. */
+  text: string;
+  /** 0 = Monday … 6 = Sunday, or null when the chat names no day. */
+  day: number | null;
+  /** Minutes after midnight, or null when no time is given. */
+  time: number | null;
+  /** Who it falls to, when the chat says so. */
+  who: string | null;
+}
+
+/** Why the room could not read a chat: AI is not set up here, today's free AI is used up, too many asks, it failed, or found nothing. */
+export type PlanTrouble = "off" | "spent" | "busy" | "failed" | "empty" | "view";
 
 /** Where someone is and what they are doing. All coordinates are world units. */
 export interface Presence {
@@ -168,6 +185,8 @@ export type ClientMessage =
   | { t: "ops"; tx: number; ops: Op[]; fx?: Effect }
   | { t: "pres"; p: Presence }
   | { t: "react"; kind: ReactionKind; x: number; y: number }
+  /** Read a pasted chat into notes. today: the sender's own date (YYYY-MM-DD), for "tomorrow" and "明天". */
+  | { t: "plan"; text: string; today?: string }
   | { t: "ping" };
 
 export type ServerMessage =
@@ -186,4 +205,6 @@ export type ServerMessage =
   | { t: "pres"; pid: string; p: Presence }
   | { t: "react"; pid: string; kind: ReactionKind; x: number; y: number }
   | { t: "pong" }
+  | { t: "plan"; ok: true; notes: PlanNote[] }
+  | { t: "plan"; ok: false; why: PlanTrouble; wait?: number }
   | { t: "error"; message: string };

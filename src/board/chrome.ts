@@ -2,10 +2,11 @@
 // bar (whose board, who is here, share, export, zoom), the toolbar, the
 // selection bar, the Tidy up button, toasts and the few dialogs.
 import { PALETTE } from "../shared/colors";
-import { ANY, DAY_HEADERS, DAY_NAMES, FROM_WORDS, NO_TIME, dateOf, dayPicked, findDay, formatTime, mondayOf, nextMonday, noteDay, noteTime, timePicked } from "../shared/days";
-import { fileStem, toCsv, toIcs, toMarkdown } from "../shared/exporter";
+import { ANY, DAY_HEADERS, DAY_NAMES, FROM_WORDS, NO_TIME, dateOf, dayPicked, findDay, findTime, formatTime, mondayOf, nextMonday, noteDay, noteTime, timePicked } from "../shared/days";
+import { boardTitle, fileStem, toCsv, toIcs, toMarkdown } from "../shared/exporter";
+import { PLAN_MAX_CHARS, linesToNotes, localIso } from "../shared/plan";
 import { REACTIONS } from "../shared/schema";
-import type { AdminAct, DeniedReason, NoteItem, ReactionKind } from "../shared/types";
+import type { AdminAct, DeniedReason, NoteItem, PlanNote, PlanTrouble, ReactionKind } from "../shared/types";
 import { escapeHtml, type Board, type Tool } from "./app";
 import { boardLink, forgetBoard, recentBoards } from "./identity";
 import type { LinkStatus } from "./net";
@@ -39,6 +40,8 @@ const ICON = {
   gear: '<circle cx="12" cy="12" r="3" fill="none"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" fill="none"/>',
   eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" fill="none"/><circle cx="12" cy="12" r="3" fill="none"/>',
   device: '<rect x="6" y="3" width="12" height="18" rx="2.5" fill="none"/><path d="M10.5 18h3" fill="none"/>',
+  chat: '<path d="M4.5 6.5h10a2 2 0 012 2v6a2 2 0 01-2 2H9.5l-3.5 3v-3H4.5a2 2 0 01-2-2v-6a2 2 0 012-2z" fill="none"/><path d="M19 2.2l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z" fill="currentColor" stroke="none"/><path d="M6 10.5h7M6 13h4.5" fill="none"/>',
+  cal: '<rect x="4" y="5" width="16" height="15" rx="2" fill="none"/><path d="M4 10h16M9 3v4M15 3v4" fill="none"/><path d="M9 15l2 2 4-4" fill="none"/>',
 };
 const icon = (name: keyof typeof ICON) => `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">${ICON[name]}</svg>`;
 
@@ -112,6 +115,7 @@ export class Chrome {
       </div>
       <nav class="toolbar" aria-label="Tools">
         ${TOOLS.map((t) => `<button class="tool" data-tool="${t.tool}" aria-label="${t.label} (${t.key})" title="${t.label} · ${t.key}">${icon(t.icon)}</button>`).join("")}
+        <button class="tool plan" aria-label="Turn a chat into a plan" title="Paste a chat: it becomes notes with their days">${icon("chat")}</button>
         <span class="sep"></span>
         <button class="tool react" aria-label="React" title="React" aria-haspopup="menu">${icon("react")}</button>
         <span class="sep desk"></span>
@@ -128,6 +132,7 @@ export class Chrome {
       <div class="empty-hint">
         <p class="big">Double-click anywhere to add a note.</p>
         <p>Name a day on it — Mon, Tue… or 周一 — or pick one, and <b>Tidy up</b> files it into that day.</p>
+        <p>Got a group chat? <b>Paste it</b>: it turns into notes, with the days, times and who.</p>
       </div>
       <div class="follow-frame"><span></span></div>
       <div class="sorted" aria-live="polite"></div>
@@ -187,6 +192,7 @@ export class Chrome {
       else if (b.classList.contains("undo")) board.undo();
       else if (b.classList.contains("redo")) board.redo();
       else if (b.classList.contains("react")) this.openMenu(this.reactMenu, b);
+      else if (b.classList.contains("plan")) this.planDialog();
     });
     this.reactMenu.addEventListener("click", (e) => {
       const b = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-react]");
@@ -1146,25 +1152,168 @@ export class Chrome {
     this.board.root.classList.remove("gated");
   }
 
+  /**
+   * Turn a chat into a plan: paste a group chat, meeting notes or a to-do
+   * list; the room's Workers AI picks out what needs doing, with the day, time
+   * and who; you look the notes over and add them, tidied into the week if you
+   * like. Where AI isn't there (a board in this browser, AI not set up, used up
+   * for the day), each line becomes a note and the words decide its day.
+   */
+  planDialog(prefill = "") {
+    const b = this.board;
+    if (b.readOnly && !b.demo) return this.viewOnly();
+    const live = !b.access?.local;
+    const d = this.dialog("", "plan-dialog");
+    const card = d.el.querySelector(".card")!;
+    let text = prefill.slice(0, PLAN_MAX_CHARS);
+    let notes: PlanNote[] = [];
+
+    const write = () => {
+      card.innerHTML = `
+        <h2>Turn a chat into a plan</h2>
+        <p class="muted">Paste a group chat, meeting notes or a to-do list. ${live ? "Longtable picks out what needs doing, with the day, the time and who it falls to." : "Each line becomes a note, and the day and time come from its words."}</p>
+        <form class="plan-form">
+          <textarea name="chat" rows="9" maxlength="${PLAN_MAX_CHARS}" spellcheck="false" aria-label="The chat" placeholder="${escapeHtml(PLAN_EXAMPLE)}"></textarea>
+          <p class="fine">${live ? "Workers AI on this Longtable’s own Cloudflare account reads the text. Nothing you paste is stored, only the notes you add." : "On a deployed Longtable, Workers AI reads the chat instead: it leaves out the small talk and finds days in words like “tomorrow”."}</p>
+          <div class="actions wrap">
+            <button type="button" class="btn ghost" data-close>Cancel</button>
+            ${live ? '<button type="button" class="btn" data-act="lines">One note per line</button>' : ""}
+            <button type="submit" class="btn primary">${live ? "Make a plan" : "Make notes"}</button>
+          </div>
+        </form>`;
+      const area = card.querySelector("textarea")!;
+      area.value = text;
+      area.addEventListener("input", () => (text = area.value));
+      area.addEventListener("keydown", (e) => {
+        e.stopPropagation();
+        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) card.querySelector<HTMLFormElement>("form")!.requestSubmit();
+      });
+      card.querySelector("[data-close]")!.addEventListener("click", d.close);
+      card.querySelector("[data-act='lines']")?.addEventListener("click", () => {
+        if (text.trim()) review(linesToNotes(text), null);
+      });
+      card.querySelector("form")!.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        if (!text.trim()) return area.focus();
+        if (!live) return review(linesToNotes(text), null);
+        const go = card.querySelector<HTMLButtonElement>("button[type=submit]")!;
+        go.disabled = true;
+        area.disabled = true;
+        go.innerHTML = `<span class="spinner" aria-hidden="true"></span>Reading the chat…`;
+        card.querySelector(".fine")!.textContent = "It reads the whole chat before it answers, so who took what and any change of plan come out right. That can take half a minute.";
+        const r = await b.link.plan(text, localIso());
+        if (!d.el.isConnected) return;
+        if (r.ok) review(r.notes, null);
+        else review(linesToNotes(text), r.why, r.wait);
+      });
+      setTimeout(() => area.focus(), 60);
+    };
+
+    const review = (found: PlanNote[], why: PlanTrouble | null, wait?: number) => {
+      notes = found;
+      const weekOf = b.state.meta.weekOf;
+      const whenOf = (n: PlanNote) => {
+        const day = n.day ?? findDay(n.text)?.day ?? null;
+        const time = n.time ?? findTime(n.text);
+        const dayText = day === null ? "Any day" : weekOf ? `${DAY_HEADERS[day]} ${dateOf(weekOf, day).getDate()}` : DAY_HEADERS[day];
+        return `${dayText}${time !== null ? ` · ${formatTime(time)}` : ""}`;
+      };
+      card.innerHTML = `
+        <h2>${notes.length ? `${notes.length} note${notes.length === 1 ? "" : "s"} from the chat` : "Nothing to add"}</h2>
+        ${why ? `<p class="plan-why">${planTrouble(why, wait, live)}</p>` : ""}
+        ${
+          notes.length
+            ? `<ul class="plan-list">${notes
+                .map(
+                  (n, i) => `<li><label><input type="checkbox" checked data-i="${i}" /><span class="when">${escapeHtml(whenOf(n))}</span><span class="what">${escapeHtml(n.text)}</span>${n.who ? `<span class="who">@${escapeHtml(n.who)}</span>` : ""}</label></li>`,
+                )
+                .join("")}</ul>
+               <label class="check-line"><input type="checkbox" name="tidy" checked /> Tidy them into the week</label>`
+            : `<p class="muted">That text has no lines to turn into notes.</p>`
+        }
+        <div class="actions wrap">
+          <button type="button" class="btn ghost" data-act="back">Back</button>
+          ${notes.length ? `<button type="button" class="btn primary" data-act="add">Add ${notes.length} note${notes.length === 1 ? "" : "s"}</button>` : ""}
+        </div>`;
+      const add = card.querySelector<HTMLButtonElement>("[data-act='add']");
+      const picked = () => [...card.querySelectorAll<HTMLInputElement>(".plan-list input[data-i]")].filter((c) => c.checked).map((c) => notes[Number(c.dataset.i)]);
+      card.querySelector(".plan-list")?.addEventListener("change", () => {
+        const n = picked().length;
+        if (add) {
+          add.disabled = !n;
+          add.textContent = `Add ${n} note${n === 1 ? "" : "s"}`;
+        }
+      });
+      card.querySelector("[data-act='back']")!.addEventListener("click", write);
+      add?.addEventListener("click", () => {
+        const chosen = picked();
+        const tidy = card.querySelector<HTMLInputElement>("input[name=tidy]")?.checked ?? false;
+        d.close();
+        b.addNotes(chosen, { tidy });
+        if (!tidy) this.toast(`Added ${chosen.length} note${chosen.length === 1 ? "" : "s"}`);
+      });
+      add?.focus();
+    };
+
+    write();
+  }
+
+  /** The board's calendar feed, with the links that subscribe to it in Google, Apple and Outlook calendars. */
+  private calendarLinks() {
+    const b = this.board;
+    const cal = b.access?.cal;
+    if (!cal || b.access?.local) return null;
+    let tz = "";
+    try {
+      tz = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "";
+    } catch {
+      // floating times it is
+    }
+    const feed = `${location.origin}/api/boards/${b.id}/cal/${cal}.ics${tz ? `?tz=${encodeURIComponent(tz)}` : ""}`;
+    const webcal = feed.replace(/^https?:/, "webcal:");
+    return {
+      feed,
+      apple: webcal,
+      google: `https://calendar.google.com/calendar/r?cid=${encodeURIComponent(webcal)}`,
+      outlook: `https://outlook.live.com/calendar/0/addfromweb?url=${encodeURIComponent(feed)}&name=${encodeURIComponent(boardTitle(b.state.meta))}`,
+    };
+  }
+
   exportWeek() {
     const b = this.board;
     const weekOf = b.state.meta.weekOf || nextMonday();
+    const cal = this.calendarLinks();
     const d = this.dialog(
       `
       <h2>Export the week</h2>
+      ${
+        cal
+          ? `<section class="subscribe">
+        <div class="sub-head">${icon("cal")}<div><b>Keep it in your calendar</b><span>Subscribe once and your calendar follows the board as it changes.</span></div></div>
+        <div class="cal-row">
+          <a class="btn" data-cal="google" href="${escapeHtml(cal.google)}" target="_blank" rel="noopener noreferrer">Google Calendar</a>
+          <a class="btn" data-cal="apple" href="${escapeHtml(cal.apple)}">Apple Calendar</a>
+          <a class="btn" data-cal="outlook" href="${escapeHtml(cal.outlook)}" target="_blank" rel="noopener noreferrer">Outlook</a>
+          <button class="btn ghost" data-cal="copy" data-url="${escapeHtml(cal.feed)}">${icon("copy")}<span>Copy link</span></button>
+        </div>
+        <p class="fine">Each calendar looks for changes on its own clock: Apple and Outlook within hours, Google sometimes only once a day. Anyone with this calendar link can read the notes that name a day; new links or a new password (Board settings) switch it off.</p>
+      </section>`
+          : ""
+      }
       <p class="muted">Every note that names a day, in day order. Notes with a time (“8 am”, “16:00”, “下午4点”) become timed events.</p>
       <label class="field">Week starting <input type="date" value="${weekOf}" /></label>
       <pre class="preview"></pre>
       <div class="actions wrap">
         <button class="btn ghost" data-close>Close</button>
         <button class="btn" data-x="csv">Spreadsheet (.csv)</button>
-        <button class="btn" data-x="ics">Calendar (.ics)</button>
+        <button class="btn" data-x="ics">Calendar file (.ics)</button>
         <button class="btn primary" data-x="md">Copy as text</button>
       </div>`,
       "export-dialog",
     );
     const date = d.el.querySelector<HTMLInputElement>("input[type=date]")!;
     const pre = d.el.querySelector("pre")!;
+    d.el.querySelector("[data-cal='copy']")?.addEventListener("click", (e) => this.copy((e.currentTarget as HTMLElement).dataset.url!, "Calendar link copied: add it in your calendar as a subscription"));
     const meta = () => ({ ...b.state.meta, weekOf: /^\d{4}-\d{2}-\d{2}$/.test(date.value) ? mondayOf(date.value) : weekOf });
     const render = () => (pre.textContent = toMarkdown(meta(), b.state.list()));
     render();
@@ -1207,4 +1356,21 @@ function download(name: string, text: string, type: string) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** What the plan dialog's empty box shows. */
+const PLAN_EXAMPLE = "Ana: Flyers need to be out by Wed 8am\nBo: I’ll order the cake stand, it has to be here Friday\n小王：周四下午4点试吃，我来订蛋糕\nCy: 👍";
+
+/** Why the chat was read line by line, in a sentence. */
+function planTrouble(why: PlanTrouble, wait: number | undefined, live: boolean): string {
+  const tail = "so each line became a note. Days and times still come from the words.";
+  if (!live || why === "off") return `Workers AI isn’t set up on this Longtable, ${tail}`;
+  if (why === "spent") {
+    const now = new Date();
+    const reset = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
+    return `Today’s free Workers AI is used up (it comes back at ${reset.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}), ${tail}`;
+  }
+  if (why === "busy") return `That’s a lot of chats in one hour (more in ${Math.ceil((wait ?? 600) / 60)} min), ${tail}`;
+  if (why === "empty") return `The AI found nothing to do in that text, ${tail}`;
+  return `The AI didn’t answer this time, ${tail} Go back and try again for a smarter read.`;
 }

@@ -12,7 +12,8 @@
   "scripts": {
     "setup": "node scripts/deploy-cloudflare.mjs",
     "dev": "vite",
-    "dev:worker": "npm run build && wrangler dev",
+    "dev:worker": "npm run build && wrangler dev --local",
+    "dev:worker:ai": "npm run build && wrangler dev",
     "build": "tsc --noEmit -p tsconfig.json && vite build",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p worker/tsconfig.json",
     "test": "vitest run",

@@ -7,8 +7,10 @@ service is involved.
 
 What runs where: one Worker serves the app and its API, and each board is a
 [Durable Object](https://developers.cloudflare.com/durable-objects/) with
-its own SQLite database. Boards stay in your Cloudflare account. Nothing is
-sent anywhere else.
+its own SQLite database. Pasted chats are read by
+[Workers AI](https://developers.cloudflare.com/workers-ai/) on the same
+account. Boards stay in your Cloudflare account. Nothing is sent anywhere
+else.
 
 ## The easiest way: one token, one command
 
@@ -94,12 +96,56 @@ is public.
   - **Clear** the board (Undo brings it back) or **delete** it. Deleting
     removes it from the server for good, and anyone on the board sees that
     it's gone.
+- **Calendar link.** *Export week → Keep it in your calendar* hands out a
+  third link, for calendar apps. It has a key of its own and can only read
+  the notes that name a day, as an `.ics` feed. Making new links or setting
+  or changing the password switches the old calendar link off; subscribed
+  calendars then stop updating until someone subscribes to the new one.
 - Anyone can choose **Forget this board here** to take it off their own
   device.
 
 To put the whole site behind your company login (Google, Microsoft, email
 codes…), add [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/applications/configure-apps/self-hosted-public-app/)
 in front of it. It's free for up to 50 users.
+
+## Reading chats with Workers AI
+
+*Paste the group chat, get a plan* works as soon as Longtable is deployed:
+the `ai` binding in `wrangler.jsonc` connects the Worker to Workers AI on
+your account. The setup token doesn't need any extra permission for it.
+
+- **Model.** `@cf/qwen/qwen3-30b-a3b-fp8`, which reads Chinese and English
+  well and is cheap. It thinks before it answers, so a chat takes about 5 to
+  30 seconds. To try another
+  [text model](https://developers.cloudflare.com/workers-ai/models/), add a
+  variable `AI_MODEL` under *Workers → your worker → Settings → Variables
+  and Secrets*.
+- **Cost.** Workers AI gives every account 10,000 *neurons* a day for free.
+  One group chat uses about 40 to 80, so that's around 150 chats a day. Each
+  answer's token and neuron count is written to the Worker's logs (never the
+  chat itself).
+- **When it runs out,** the dialog says so and turns each line into a note
+  instead, until the allowance resets at 00:00 UTC. On Workers Paid you get
+  the same 10,000 free and pay for the rest. One address can ask 20 times an
+  hour on a board, so nobody spends the day's allowance alone.
+- **Privacy.** The chat goes from the board's room to Workers AI and back,
+  inside your Cloudflare account. It is never stored or logged; only the
+  notes someone chooses to add are kept. A watch link can't send a chat.
+- **To turn it off,** delete the `ai` block from `wrangler.jsonc` and deploy
+  again. Pasting a chat then always makes one note per line.
+
+## Calendar feeds
+
+Each board's feed is
+`https://<your Longtable>/api/boards/<board>/cal/<key>.ics`. The buttons
+under *Keep it in your calendar* subscribe Google Calendar, Apple Calendar
+or Outlook to it, and *Copy link* is there for anything else that takes a
+calendar address. The feed holds every note that names a day, dated by the
+board's *Week starting*, as timed or all-day events. It asks calendars to
+look again every hour and keeps each event's id, so a moved note moves in
+the calendar rather than appearing twice. How often a calendar really looks
+is up to it: Apple and Outlook within hours, Google sometimes only once a
+day. A deleted board's feed answers *410 Gone*, and calendars drop it.
 
 ## Your own domain
 
@@ -110,8 +156,9 @@ account.
 ## What the free plan covers
 
 The free plan resets every day at 00:00 UTC. If a limit runs out, boards stop
-answering until the reset. Nothing is lost. For more, Workers Paid is
-$5 a month.
+answering until the reset. Nothing is lost. (The Workers AI allowance is the
+exception: when it runs out, only reading chats stops, and pasting a chat
+makes one note per line.) For more, Workers Paid is $5 a month.
 
 | Limit per day | What uses it | Roughly |
 | --- | --- | --- |
@@ -120,6 +167,11 @@ $5 a month.
 | 13,000 GB-s of Durable Object time | a board only counts while people are doing something; open but idle tabs cost nothing | about 28 hours of active boards |
 | 100,000 rows written | each changed note is written at most once a second | plenty for a team |
 | 5 GB stored | a board is about 50–200 KB | tens of thousands of boards |
+| 10,000 Workers AI neurons | reading pasted chats, about 40 to 80 a chat | about 150 chats |
+
+A subscribed calendar looking for changes costs one Worker request and one
+Durable Object request, so even 100 calendars checking every hour use only a
+few percent of the day.
 
 In practice the free plan covers a team of 10 to 20 people who plan together
 for a couple of hours a day.

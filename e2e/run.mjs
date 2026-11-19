@@ -56,7 +56,8 @@ async function startServer() {
   // A fresh store each run, so boards and counts from an earlier run don't carry over.
   store = mkdtempSync(join(tmpdir(), "longtable-e2e-"));
   // Its own process group, so stopping it also stops wrangler's workerd.
-  server = spawn("npx", ["wrangler", "dev", "--port", String(PORT), "--ip", "127.0.0.1", "--persist-to", store, "--var", `CREATE_PASSWORD:${TEAM}`], {
+  // --local: no Cloudflare login needed; Workers AI is then off and chats are read line by line.
+  server = spawn("npx", ["wrangler", "dev", "--local", "--port", String(PORT), "--ip", "127.0.0.1", "--persist-to", store, "--var", `CREATE_PASSWORD:${TEAM}`], {
     env: { ...process.env, CI: "true", WRANGLER_SEND_METRICS: "false" },
     stdio: ["ignore", "pipe", "pipe"],
     detached: true,
@@ -276,6 +277,8 @@ try {
   const vh = P.viewportSize().height;
   check(bar && bar.y > vh - 120 && bar.x >= 0 && bar.x + bar.width <= 390, "on a phone the toolbar sits at the bottom, inside the screen");
   check((await P.evaluate(() => document.documentElement.scrollWidth)) <= 390, "no sideways scroll on a phone");
+  const top = await P.$$eval(".topbar .right > *", (els) => els.map((e) => { const r = e.getBoundingClientRect(); return { c: e.className, w: r.width, right: r.right }; }));
+  check(top.some((t) => /export/.test(t.c) && t.w > 0 && t.right <= 390) && top.every((t) => t.right <= 390), "on a phone Export (and the calendar) is in the top bar, inside the screen");
 
   // The demo: a button in the corner of every board, and the whole story on a board of its own.
   check((await A.$eval(".demo-controls [data-demo='play']", (b) => b.textContent)).includes("Play the demo"), "every board has a Play the demo button in the corner");
@@ -521,6 +524,91 @@ try {
     await T.fill(".team-form input", TEAM);
     await T.click(".team-form button[type=submit]");
     await settle(T.waitForSelector(".board-app .empty-hint.show", { timeout: 6000 }), "the team password page lets the team start a board");
+  }
+
+  // A chat becomes a plan; the week goes into calendars.
+  {
+    const made = await (await makeBoard("blank")).json();
+    const P = await person(browser, "Fen", "#A8E6B8");
+    await P.goto(`${base}/b/${made.id}#o=${made.owner}`);
+    await P.waitForSelector(".board-app .empty-hint.show", { timeout: 6000 });
+    const Q = await person(browser, "Gil", "#FF9FC0");
+    await Q.goto(`${base}/b/${made.id}#k=${made.edit}`);
+    await Q.waitForSelector(".board-app .empty-hint.show", { timeout: 6000 });
+    const chat = [
+      "[19/11 12:03] Ana: Flyers out Wed 8 am",
+      "[19/11 12:04] Bo: I'll bring the cake stand Friday",
+      "[19/11 12:05] Cy: 👍",
+      "[19/11 12:06] 小王：周四下午4点试吃，我来订蛋糕",
+      "[19/11 12:07] Dee: ok",
+      "[19/11 12:08] Eli: count the till on Sunday",
+    ].join("\n");
+    // Pasting a chat opens the plan, filled in.
+    await P.evaluate((text) => {
+      const dt = new DataTransfer();
+      dt.setData("text/plain", text);
+      window.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true }));
+    }, chat);
+    await settle(P.waitForSelector(".plan-dialog.open textarea", { timeout: 3000 }), "pasting a chat opens “Turn a chat into a plan”");
+    check((await P.$eval(".plan-dialog textarea", (t) => t.value)) === chat, "with the chat already in it");
+    await P.click(".plan-dialog button[type=submit]");
+    await P.waitForSelector(".plan-list", { timeout: 70_000 });
+    const listed = await P.$$eval(".plan-list .what", (els) => els.map((e) => e.textContent));
+    const why = await P.$eval(".plan-dialog", (d) => d.querySelector(".plan-why")?.textContent ?? "");
+    if (process.env.BASE_URL) {
+      check(!why, `Workers AI reads the chat${why ? ` (it said: ${why})` : ""}`);
+      check(listed.length >= 3 && listed.length <= 6, `and picks out the things to do (${listed.length}: ${listed.join(" | ")})`);
+      check(!listed.some((t) => /^(ok|👍)$/i.test(t)), "leaving out the small talk");
+    } else {
+      check(/isn’t set up/.test(why), "without Workers AI, the dialog says each line became a note");
+      check(listed.length === 4 && listed[0] === "Flyers out Wed 8 am", `names, times and small talk are taken off (${listed.join(" | ")})`);
+    }
+    await P.click(".plan-dialog [data-act='add']");
+    await settle(
+      Q.waitForFunction((n) => document.querySelectorAll(".item.note").length === n, listed.length, { timeout: 6000 }),
+      "the notes reach everyone on the board",
+    );
+    await settle(Q.waitForSelector(".item.week", { state: "attached", timeout: 6000 }), "and are tidied into the week");
+
+    // A script with the edit key asks too.
+    const rs = await rawSession(made.id, { key: made.edit });
+    const init = await rs.next(["init"]);
+    rs.send({ t: "plan", text: "Ana: flyers out on Wednesday at 8\nBo: 👍", today: "2026-11-19" });
+    const answer = await rs.next(["plan"], 70_000);
+    if (process.env.BASE_URL) check(answer?.ok === true && answer.notes.some((n) => n.day === 2), `the room answers with notes and their days (${JSON.stringify(answer?.notes ?? answer)})`);
+    else check(answer?.ok === false && answer.why === "off", "the room says when Workers AI isn’t there");
+    const rv = await rawSession(made.id, { key: init.access.view });
+    const vinit = await rv.next(["init"]);
+    rv.send({ t: "plan", text: "anything", today: "2026-11-19" });
+    check((await rv.next(["plan"]))?.why === "view", "the watch link can’t have chats read");
+
+    // The calendar feed.
+    const cal = init.access.cal;
+    check(/^[a-z0-9]{26}$/.test(cal ?? "") && vinit.access.cal === cal, "every link gets the board’s calendar link");
+    const feedUrl = (k) => `/api/boards/${made.id}/cal/${k}.ics?tz=Asia/Tokyo`;
+    const feed = await api(feedUrl(cal));
+    const ics = await feed.text();
+    check(feed.status === 200 && /^text\/calendar/.test(feed.headers.get("content-type") ?? ""), "the calendar feed is a calendar");
+    check(ics.includes("X-WR-TIMEZONE:Asia/Tokyo") && ics.includes("REFRESH-INTERVAL") && /SUMMARY:.*(Flyers|flyers)/.test(ics), "with the week’s notes, refreshed hourly, in the asker’s time zone");
+    check((await api(feedUrl("a".repeat(26)))).status === 404, "a made-up calendar key gets nothing");
+    await P.click(".topbar .export");
+    await P.waitForSelector(".export-dialog.open .subscribe");
+    const links = await P.$$eval(".subscribe [data-cal]", (els) => Object.fromEntries(els.map((e) => [e.dataset.cal, e.getAttribute("href") ?? e.dataset.url])));
+    check(
+      links.google?.startsWith("https://calendar.google.com/calendar/r?cid=webcal%3A%2F%2F") && links.apple?.startsWith("webcal://") && links.outlook?.includes("addfromweb") && links.copy?.includes(`/cal/${cal}.ics`),
+      "Export offers Google, Apple and Outlook calendars and the link",
+    );
+    await P.keyboard.press("Escape");
+    const ro = await rawSession(made.id, { owner: made.owner });
+    await ro.next(["init"]);
+    ro.send({ t: "admin", act: "links" });
+    await ro.next(["done"]);
+    const fresh = (await ro.next(["access"]))?.access?.cal;
+    check((await api(feedUrl(cal))).status === 404 && fresh && fresh !== cal && (await api(feedUrl(fresh))).status === 200, "new links give the board a new calendar link and switch the old one off");
+    ro.send({ t: "admin", act: "delete" });
+    await ro.next(["done"]);
+    check((await api(feedUrl(fresh))).status === 410, "and a deleted board’s calendar says it’s gone");
+    for (const x of [rs, rv, ro]) x.close();
   }
 
   // One address can't start boards without end (only here: it would use up the quota of a real deployment).

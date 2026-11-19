@@ -7,7 +7,7 @@
 **大家一起排计划，乱了也不怕，点一下就整理成一周。**
 
 一块多人实时协作的计划白板：每个人同时写便签，看得到彼此的光标，连别人正在打的字也看得到。
-点 **Tidy up**，每张便签自动归到它写的那一天；排好的一周可以复制成文字，也能导出表格或日历。
+群聊记录一贴就变成便签；点 **Tidy up**，每张便签自动归到它写的那一天；排好的一周会自己出现在每个人的日历里。
 
 [English](README.md) · **简体中文**
 
@@ -17,9 +17,9 @@
 [![Runs on the Cloudflare free plan](https://img.shields.io/badge/runs%20on-Cloudflare%20free%20plan-FFB38A?style=flat-square&labelColor=17181C)](DEPLOY.md#what-the-free-plan-covers)
 [![No accounts](https://img.shields.io/badge/accounts-none-9DF0C4?style=flat-square&labelColor=17181C)](#默认就是私密的)
 
-<img src="docs/images/tidy.gif" width="860" alt="五个人的便签散落在白板上，按下 Tidy up 后弹进周一到周日七列，下方升起一行字 “Opening week, sorted.”" />
+<img src="docs/images/longtable.webp" width="860" alt="五个人在同一块白板上筹备一家面包店的开业周：带名字的光标写便签、勾清单、放照片，按下 Tidy up 后所有便签弹进周一到周日七列，下方升起一行字 “Opening week, sorted.”" />
 
-<sub>首页会自己播放这一段：五个虚构的人给一家虚构的面包店排开业周，最后 Ana 按下 Tidy up。</sub>
+<sub>Longtable 就是从这支短片长出来的：五个虚构的人给一家虚构的面包店排开业周，最后 Ana 按下 Tidy up。首页会用真的白板把同一个故事现场演一遍。</sub>
 
 </div>
 
@@ -47,7 +47,7 @@
 打字时别人那边一个字一个字地出现。点顶栏上某个人的头像，你的画面就跟着他走。
 
 双击空白处写**便签**，也可以加**标题**、**清单**，或者用**画笔**。拖动来移动，
-按住 `Alt` 拖动是复制，粘贴一段多行文字会变成一行一张便签。
+按住 `Alt` 拖动是复制，粘贴几行短清单会变成一行一张便签。
 可以用自己颜色的圆点投票，也可以发表情，表情会从你的光标处飘起来。
 
 </td>
@@ -69,13 +69,32 @@
 </td>
 </tr>
 <tr>
+<td width="50%"><img src="docs/images/plan.png" alt="“6 notes from the chat” 对话框：Flyers out 周四 08:00 归 Ana，Bring cake stand 周五归 Bo，Call printer 周五归 Cy，试吃 周四 16:00，订蛋糕 归小王，Count till 周日归 Eli，每条前面有勾选框，下面勾着 “Tidy them into the week”。" /></td>
 <td width="50%" valign="top">
 
-### 排好的一周发到哪都行
+### 群聊记录一贴，就是一份计划
 
-**Export week** 可以复制成 Markdown 发到群里，也可以下载 **CSV**（用表格打开）
-或 **`.ics`** 日历文件，有时间的是定时日程，没时间的是全天日程。设好这周从哪天开始，
-每张便签就对上了真实日期。
+把群聊、会议记录或待办清单贴进来（或者点工具栏上的聊天按钮），
+[Workers AI](https://developers.cloudflare.com/workers-ai/) 会挑出要做的事：一件事一张便签，
+带上哪天、几点、谁来做。它先把整段聊天读完再回答，所以「还是改到周五吧」会挪动原来那件事，
+而不是多出一张；中文说的事还是中文，英文说的还是英文。看一遍，把不要的取消勾选，
+加进白板时顺手排进这一周。
+
+用的是你自己 Cloudflare 账号里免费的 AI 额度。聊天记录不存、不记日志，只留下你加进去的便签。
+没有 AI 的时候（本地运行，或者当天额度用完了），就退回成一行一张便签。
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### 计划自动进日历
+
+**Export week → Keep it in your calendar** 可以让谷歌日历、苹果日历或 Outlook 订阅这块白板。
+每张写了日子的便签都是一个日程，有时间的是定时日程，没时间的是全天日程；计划一改，
+日历会自己跟着变。不用登录，也不用装任何东西。
+
+同一个对话框里还能复制成 Markdown 发到群里，或者下载 **CSV**（用表格打开）和一次性的 **`.ics`** 文件。
 
 ### 手机能用，断网一会儿也不丢
 
@@ -83,7 +102,7 @@
 连上之后自动发出去。
 
 </td>
-<td width="50%"><img src="docs/images/export.png" alt="导出对话框：这一周显示成 Markdown 清单，下面是导出 CSV 和日历文件的按钮。" /></td>
+<td width="50%"><img src="docs/images/export.png" alt="导出对话框：上面是 “Keep it in your calendar”，有谷歌日历、苹果日历、Outlook 和复制链接四个按钮；下面是这一周的 Markdown 清单和导出 CSV、日历文件的按钮。" /></td>
 </tr>
 </table>
 
@@ -111,6 +130,8 @@
 | 链接密钥 | 26 位随机字符，约 130 位强度。主人密钥只存 SHA-256 哈希。 |
 | 密码 | PBKDF2-SHA-256，10 万轮，每块白板单独加盐。同一个地址连续输错 5 次后要等 30 秒，之后每次翻倍，最多 15 分钟。错误次数存在白板自己的存储里，保留一天，存的是地址的哈希，不是地址本身。 |
 | 只读链接 | 服务器会拒绝它发来的每一个修改，不只是页面上不让点。 |
+| 日历链接 | 用单独的一段密钥，只能读到写了日子的便签。换新链接或者改密码，旧的日历链接就失效。 |
+| 贴进来的聊天记录 | 由你自己账号里的 Workers AI 读完就丢，不存、不记日志。只读链接不能发。 |
 | 创建白板 | 可以设一个**团队密码**。不设的话，同一个地址每小时也只能建 30 块白板。 |
 | 页面 | 严格的内容安全策略（CSP），不带来源信息、不允许被嵌入，每个页面都要求搜索引擎不收录。 |
 | 删除 | 白板的存储整个清掉，只留下删除日期，好让旧链接告诉别人它已经删了。 |
@@ -176,8 +197,11 @@ CLOUDFLARE_API_TOKEN=… npm run setup -- --yes --name longtable --team-password
 ```sh
 npm install
 npm run dev:worker     # 先构建，再在 http://localhost:8787 跑起页面和实时白板
+npm run dev:worker:ai  # 同上，但贴聊天记录时用真的 Workers AI（先 npx wrangler login）
 npm run dev            # 只跑前端，改代码自动刷新；白板只存在这个浏览器里
 ```
+
+`dev:worker` 不连 Cloudflare，所以在那里贴聊天记录是一行一张便签；`dev:worker:ai` 会把 AI 那部分交给你的 Cloudflare 账号。
 
 ```sh
 npm test               # 单元测试：识别日子和时间、整理、校验、导出、权限
@@ -189,6 +213,7 @@ npm run build && npm run e2e
 （第一次需要 `npx playwright install chromium`）。它覆盖多人实时编辑、整理、导出，
 以及所有隐私规则：没有密钥和瞎编密钥的链接、只读链接（也包括直接连服务器的脚本）、
 密码和输错之后的等待、同时发出的一堆猜测、换链接、清空、删除、团队密码、建白板的频率限制和安全响应头。
+它还会贴一段聊天记录，检查日历订阅和它的密钥；测已经部署好的站点时，聊天记录会真的交给 Workers AI 读。
 要测已经部署好的站点：`BASE_URL=https://… npm run e2e`（设了团队密码就再加 `TEAM_PASSWORD=…`）。
 
 ## 怎么做的
@@ -202,10 +227,14 @@ flowchart LR
     worker["Worker<br/>页面文件和 /api"]
     gate["创建前检查<br/>团队密码、频率限制"]
     room["白板房间 · Durable Object<br/>SQLite、可休眠的 WebSocket"]
+    ai["Workers AI<br/>读贴进来的聊天记录"]
   end
+  cal["日历应用"]
   app -- "创建白板" --> worker
   worker --> gate
   app <-- "修改、光标、表情" --> room
+  room -- "贴进来的聊天记录" --> ai
+  cal -- "每小时取一次 .ics" --> worker
 ```
 
 每一次修改都是一个 **op**：`put`、`patch`、`del`、`vote` 或 `meta`。浏览器先在本地应用自己的 op，
@@ -216,11 +245,11 @@ flowchart LR
 
 ```
 src/shared/   前后端共用的模型：便签和 op、每个修改都要过的校验、应用和撤销、
-              识别日子和时间、整理、导出、模板
+              识别日子和时间、整理、导出和日历订阅、读聊天记录（plan.ts）、模板
 src/board/    浏览器里的白板：状态和撤销（app.ts）、各类元素（views.ts）、鼠标触摸和键盘
               （input.ts）、打字（editor.ts）、光标（people.ts）、工具栏和对话框（chrome.ts）、
               连接（net.ts）、首页演示（demo.ts）
-worker/       接口和静态文件（index.ts）、一块白板的房间（room.ts）、
+worker/       接口和静态文件（index.ts）、一块白板的房间，包括日历订阅和读聊天记录（room.ts）、
               密钥、密码和输错计数（access.ts）
 scripts/      npm run setup（deploy-cloudflare.mjs）
 e2e/          端到端测试

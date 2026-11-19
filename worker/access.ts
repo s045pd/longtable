@@ -9,6 +9,8 @@ export interface Lock {
   edit: string;
   /** The key of the watch-only link. */
   view: string;
+  /** The key of the calendar feed; boards from before calendars get one when first opened. */
+  cal?: string;
   /** SHA-256 of the owner key (the owner key itself is never stored). */
   owner: string;
   /** The password, as PBKDF2-SHA-256 of it with its own salt. */
@@ -64,7 +66,7 @@ export async function checkPassword(pw: unknown, stored: NonNullable<Lock["pw"]>
 /** A new board's keys. The owner key goes to the person who made the board and is stored only as a hash. */
 export async function newLock(): Promise<{ lock: Lock; ownerKey: string }> {
   const ownerKey = newKey();
-  return { lock: { edit: newKey(), view: newKey(), owner: await sha256(ownerKey) }, ownerKey };
+  return { lock: { edit: newKey(), view: newKey(), cal: newKey(), owner: await sha256(ownerKey) }, ownerKey };
 }
 
 /** Which role a hello's keys give, or null when they open nothing. */
@@ -80,8 +82,20 @@ export const accessFor = (lock: Lock, role: Role): Access => ({
   role,
   password: !!lock.pw,
   view: lock.view,
+  ...(lock.cal ? { cal: lock.cal } : {}),
   ...(role === "viewer" ? {} : { edit: lock.edit }),
 });
+
+/** An IANA time zone name the runtime knows, or undefined. */
+export function cleanZone(tz: string | null | undefined): string | undefined {
+  if (!tz || tz.length > 40 || !/^[A-Za-z][A-Za-z0-9_+\-]*(?:\/[A-Za-z0-9_+\-]+){0,2}$/.test(tz)) return undefined;
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: tz });
+    return tz;
+  } catch {
+    return undefined;
+  }
+}
 
 /** Wrong tries from one address. */
 export interface TryRecord {
