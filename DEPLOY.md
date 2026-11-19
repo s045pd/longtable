@@ -5,6 +5,13 @@ servers, live editing with everyone on a board, private links, passwords. It
 all fits Cloudflare's **free plan**. No credit card is needed and no other
 service is involved.
 
+> [!IMPORTANT]
+> **It takes about a minute** (57 seconds from the first step to live, the
+> time we tried the Deploy to Cloudflare button). **The deploy log ends with
+> your address and the password, `longtable`.** Every new Longtable starts
+> with that password; the first time you come in, it asks you to pick your
+> own. See [Who can get in](#who-can-get-in).
+
 What runs where: one Worker serves the app and its API, and each board is a
 [Durable Object](https://developers.cloudflare.com/durable-objects/) with
 its own SQLite database. Pasted chats are read by
@@ -36,9 +43,9 @@ newer.
 
    Paste the token when it asks. The token isn't shown, and it is never
    saved. Setup finds your account and asks for a name (default
-   `longtable`). It also asks for an optional team password (see below).
-   Then it installs, builds, deploys and checks the result. At the end it
-   prints your address, `https://longtable.<your-subdomain>.workers.dev`.
+   `longtable`). Then it installs, builds, deploys and checks the result. At
+   the end it prints your address, `https://longtable.<your-subdomain>.workers.dev`,
+   and the password: `longtable`, until you pick your own on the site.
 
 That's it. To update to a newer Longtable, get the new code and run
 `npm run setup` again. Your boards stay as they are.
@@ -46,33 +53,72 @@ That's it. To update to a newer Longtable, get the new code and run
 Without questions, for scripts:
 
 ```sh
-CLOUDFLARE_API_TOKEN=… npm run setup -- --yes --name longtable --team-password '…'
+CLOUDFLARE_API_TOKEN=… npm run setup -- --yes --name longtable
 ```
+
+Add `--password '…'` to fix the site's password in Cloudflare instead
+(`--password off` opens the site to everyone; `--password reset` goes back
+to the one picked on the site).
 
 ## Other ways
 
 **From GitHub, without a computer.** Put the code in a repository of your
 own. Under *Settings → Secrets and variables → Actions*, add the secret
 `CLOUDFLARE_API_TOKEN` (the token from step 1). You can also add the secrets
-`LONGTABLE_TEAM_PASSWORD` and `CLOUDFLARE_ACCOUNT_ID`. Then go to *Actions →
+`CLOUDFLARE_ACCOUNT_ID` and `LONGTABLE_SITE_PASSWORD` (works like
+`--password` above). Then go to *Actions →
 Deploy to Cloudflare → Run workflow*. To deploy on every push to `main`, add
 the repository variable `AUTO_DEPLOY` = `true`.
 
 **Deploy to Cloudflare button.** The README's button does all of this from
 the browser: it copies the code into your GitHub account and deploys it, so
-you don't need a token or Node. It works only while the Longtable repository
-is public.
+you don't need a token or Node. Leave the build and deploy commands as they
+are filled in (`npm run build`, `npm run deploy`). It takes about a minute,
+and the deploy log ends with your address and password, like this:
 
-**By hand.** `npx wrangler login`, then `npm install` and `npm run deploy`.
+```text
+────────────────────────────────────────────────────────────────
+  Longtable is live · deployed in 17 s
+
+  Address   https://longtable.your-subdomain.workers.dev
+  Password  longtable
+            The initial password, the same for every new Longtable.
+            Open the address, come in with it, and it asks you to pick
+            your own. Already picked one? Then it's yours.
+
+  Board links you send people open without the password.
+────────────────────────────────────────────────────────────────
+```
+
+The time in the box is the deploy step's own; Cloudflare's log shows the
+steps before it. Every push to your copy deploys again, and your boards and
+password stay as they are.
+
+**By hand.** `npx wrangler login`, then `npm install` and `npm run deploy`
+(it builds, deploys and prints the same box).
 
 ## Who can get in
 
-- **Starting boards.** By default anyone who knows your Longtable's address
-  can start a board on it. To keep that to your team, set a **team
-  password**. Setup asks for it. Or add a secret named `CREATE_PASSWORD`
-  under *Workers → your worker → Settings → Variables and Secrets*. People
-  you send a board link to never need it. Either way, one address can start
-  at most 30 boards an hour, so a script can't use up the day's free quota.
+- **The site's password.** Your Longtable asks for a password before the
+  front page, the demo or a new board, so someone who finds the address
+  meets a password screen and nothing else.
+  - It starts as **`longtable`**, the same for every new Longtable. Because
+    that is written here, the first time someone comes in with it Longtable
+    asks them to pick their own (they can say *Later*). It can be changed
+    any time under *Your boards → Site password…*, with the current one.
+  - Typed once, a browser stays in for half a year, or until the password
+    changes. Then everyone types the new one once. After five wrong tries
+    from one address it waits, from 30 seconds up to 15 minutes. A password
+    picked on the site is stored only as a salted PBKDF2 hash.
+  - **Board links never need it.** People you send a link to open that board
+    straight away; the link's own key is the board's lock.
+  - **To fix it in Cloudflare instead,** add a secret named `SITE_PASSWORD`
+    under *Workers → your worker → Settings → Variables and Secrets*. It wins
+    over the one picked on the site, which is also how you get back in if you
+    forget that one. Set it to `off` to open the site to everyone. (The old
+    name, `CREATE_PASSWORD`, works the same.)
+  - Either way, one address can start at most 30 boards an hour, so a script
+    can't use up the day's free quota.
 - **Opening a board.** Only someone with one of the board's links gets in.
   The board's address alone opens nothing. The secret part of the link comes
   after the `#`, and browsers never send that part to a server, so it stays
@@ -213,5 +259,6 @@ Everything on a board is stored in the board's Durable Object in your
 Cloudflare account. Cloudflare encrypts it at rest. Deleting a board erases
 its storage. All that's left is the date it was deleted, so its link can say
 so. Cursors, selections and who is online are passed between people but
-never stored. Addresses are never stored either: counting wrong passwords
+never stored. The site's password, when picked on the site, is kept as a
+salted hash in a Durable Object of its own. Addresses are never stored either: counting wrong passwords
 and new boards uses a short hash of the address, forgotten within a day.

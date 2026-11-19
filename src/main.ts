@@ -13,83 +13,53 @@ import { TEMPLATES, type TemplateName } from "./shared/templates";
 import { localIso } from "./shared/plan";
 import { renderLanding } from "./landing";
 import { carryTo, keysFromHash, loadKeys, saveKeys } from "./board/identity";
+import { askSite, siteStatus } from "./site";
 
 const app = document.getElementById("app")!;
 const params = new URLSearchParams(location.search);
 export const LIVE = import.meta.env.PROD || params.has("live");
 
-const TEAM = "longtable:team";
+// The old team password was kept here in plain text; the site's password now lives in a cookie only the server reads.
+try {
+  localStorage.removeItem("longtable:team");
+} catch {
+  // no storage
+}
 
-/**
- * Make a board and go to it. On a Longtable whose owner set a team password,
- * the first board asks for it (this browser remembers it).
- */
-export async function startBoard(template: TemplateName, password?: string) {
+/** Make a board and go to it. Without the site's password, ask for it first. */
+export async function startBoard(template: TemplateName) {
   if (!LIVE) {
     const id = newBoardId();
     if (params.has("carry")) carryTo(id);
     history.pushState({}, "", `/b/${id}?t=${template}`);
     return route();
   }
-  let saved: string | undefined;
-  try {
-    saved = localStorage.getItem(TEAM) ?? undefined;
-  } catch {
-    // no storage: ask each time
-  }
-  const pw = password ?? saved;
-  // Ask first rather than be turned away, when this Longtable has a team password.
-  if (!pw) {
-    const health = (await fetch("/api/health").then((r) => r.json()).catch(() => ({}))) as { createPassword?: boolean };
-    if (health.createPassword) return askTeamPassword(template, {});
-  }
-  const res = await fetch("/api/boards", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ template, today: localIso(), ...(pw ? { password: pw } : {}) }) });
+  const res = await fetch("/api/boards", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ template, today: localIso() }) });
   if (res.status === 401 || res.status === 429) {
     const body = (await res.json().catch(() => ({}))) as { error?: string; wait?: number };
     if (body.error === "too-many-boards") {
       return cantStart(`That’s a lot of new boards in one hour. You can start another in ${minutes(body.wait ?? 3600)}.`);
     }
-    try {
-      localStorage.removeItem(TEAM);
-    } catch {
-      // ignore
-    }
-    return askTeamPassword(template, { wrong: !!pw && pw === password, wait: body.wait });
+    return askSite(app, () => startBoard(template).catch(() => cantStart()));
   }
   if (!res.ok) throw new Error(`Could not start a board (${res.status})`);
   const made = (await res.json()) as { id: string; edit: string; owner: string };
-  if (pw) {
-    try {
-      localStorage.setItem(TEAM, pw);
-    } catch {
-      // ignore
-    }
-  }
   saveKeys(made.id, { key: made.edit, owner: made.owner });
   if (params.has("carry")) carryTo(made.id);
   history.pushState({}, "", `/b/${made.id}#k=${made.edit}`);
   route();
 }
 
-/** This Longtable is kept for one team: starting a board needs the team password. */
-function askTeamPassword(template: TemplateName, info: { wrong?: boolean; wait?: number }) {
-  app.className = "landing";
-  app.innerHTML = `<main class="lost team">
-    <h1>Starting a board needs the team password</h1>
-    <p>Whoever runs this Longtable set one, so only their team can make boards here. Boards you’re sent a link to open without it.</p>
-    <form class="team-form">
-      <label class="field"><span>Team password</span><input type="password" name="pw" autocomplete="current-password" required /></label>
-      <p class="form-error" aria-live="polite">${info.wait ? `Too many tries: wait ${minutes(info.wait)}.` : info.wrong ? "That’s not it. Try again." : ""}</p>
-      <div class="actions"><a class="btn ghost" href="/">Watch the demo</a><button class="btn primary" type="submit">Start the board</button></div>
-    </form>
-  </main>`;
-  const form = app.querySelector("form")!;
-  const input = form.querySelector("input")!;
-  input.focus();
-  form.addEventListener("submit", (e) => {
-    e.preventDefault();
-    if (input.value) startBoard(template, input.value).catch(() => cantStart());
-  });
+/**
+ * Everything but a board link waits for the site's password: the front page,
+ * the demo, the introduction and starting a board. Coming in with the initial
+ * one asks for a password of your own first.
+ */
+async function inside(go: () => void) {
+  if (!LIVE) return go();
+  const site = await siteStatus();
+  if (!site.gate || site.in) return go();
+  askSite(app, go);
 }
 
 const minutes = (s: number) => (s < 60 ? `${s} s` : `${Math.ceil(s / 60)} min`);
@@ -120,17 +90,17 @@ function route() {
   }
   // The front page is the demo: it plays as soon as you arrive.
   if (location.pathname === "/" || location.pathname === "/demo" || location.pathname === "/demo/") {
-    new Board(app, "demo", { live: false, demo: true });
+    inside(() => new Board(app, "demo", { live: false, demo: true }));
     return;
   }
   if (location.pathname === "/new") {
     const t = params.get("template");
-    startBoard((TEMPLATES as readonly string[]).includes(t ?? "") ? (t as TemplateName) : "blank").catch(() => cantStart());
+    inside(() => startBoard((TEMPLATES as readonly string[]).includes(t ?? "") ? (t as TemplateName) : "blank").catch(() => cantStart()));
     return;
   }
   // The old front page, with the pitch and the feature cards.
   if (location.pathname === "/about") {
-    renderLanding(app, startBoard);
+    inside(() => renderLanding(app, startBoard));
     return;
   }
   app.className = "landing";

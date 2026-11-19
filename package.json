@@ -18,7 +18,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p worker/tsconfig.json",
     "test": "vitest run",
     "e2e": "node e2e/run.mjs",
-    "deploy": "npm run build && wrangler deploy"
+    "deploy": "node scripts/deploy.mjs"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20261031.1",
@@ -43,8 +43,8 @@
       "BOARDS": {
         "description": "Each board is one Durable Object with its own SQLite storage (free plan)."
       },
-      "CREATE_PASSWORD": {
-        "description": "Optional secret. Set it (Settings → Variables and Secrets) and only people who know it can start new boards; people you send a board link to never need it."
+      "SITE_PASSWORD": {
+        "description": "Optional secret. Without it, your Longtable asks for the initial password `longtable` and has you pick your own on the site. Set it (Settings → Variables and Secrets) to fix the password here instead, or to `off` to open the site to everyone. Board links never need it."
       }
     }
   }

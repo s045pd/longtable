@@ -18,6 +18,8 @@
 [![Runs on the Cloudflare free plan](https://img.shields.io/badge/runs%20on-Cloudflare%20free%20plan-FFB38A?style=flat-square&labelColor=17181C)](DEPLOY.md#what-the-free-plan-covers)
 [![No accounts](https://img.shields.io/badge/accounts-none-9DF0C4?style=flat-square&labelColor=17181C)](#默认就是私密的)
 
+**大约一分钟部署完。** 部署日志最后会打印你的网址和密码：**`longtable`**，进去后改成你自己的。[部署完之后 ↓](#部署完之后)
+
 <img src="docs/images/longtable.webp" width="860" alt="五个人在同一块白板上筹备一家面包店的开业周：带名字的光标写便签、勾清单、放照片，按下 Tidy up 后所有便签弹进周一到周日七列，下方升起一行字 “Opening week, sorted.”" />
 
 <sub>Longtable 就是从这支短片长出来的：五个虚构的人给一家虚构的面包店排开业周，最后 Ana 按下 Tidy up。首页会用真的白板把同一个故事现场演一遍。</sub>
@@ -182,7 +184,7 @@
 | 日历链接 | 用单独的一段密钥，只能读到写了日子的便签。换新链接或者改密码，旧的日历链接就失效。 |
 | AI 助手（MCP） | 白板的 MCP 地址里有单独的一段密钥，只给能编辑的人看。它能像编辑链接一样改白板；换新链接或者改密码就失效。同一个地址每小时最多向一块白板发 600 次请求。 |
 | 贴进来的聊天记录 | 由你自己账号里的 Workers AI 读完就丢，不存、不记日志。只读链接不能发。 |
-| 创建白板 | 可以设一个**团队密码**。不设的话，同一个地址每小时也只能建 30 块白板。 |
+| 整个站点 | 首页、演示和新建白板前面有一道**访问密码**：一开始是 `longtable`，之后改成你自己的。白板链接不需要它。输错和白板密码一样要等，同一个地址每小时最多建 30 块白板。 |
 | 页面 | 严格的内容安全策略（CSP），不带来源信息、不允许被嵌入，每个页面都要求搜索引擎不收录。 |
 | 删除 | 白板的存储整个清掉，只留下删除日期，好让旧链接告诉别人它已经删了。 |
 
@@ -211,21 +213,52 @@ Longtable 完全跑在 **Cloudflare 免费套餐**上：一个 Worker 提供页�
    ```
 
    按提示粘贴令牌（输入时不显示，也不会被保存）。它会自己找到你的账号，问你起个名字
-   （默认 `longtable`），问要不要设团队密码，然后安装、构建、部署，最后检查一遍。
-   结束时打印出你的地址：`https://longtable.<你的子域名>.workers.dev`。
+   （默认 `longtable`），然后安装、构建、部署，最后检查一遍。
+   结束时打印出你的网址和密码（见下面）。
 
 以后要更新，拿到新代码再运行一次 `npm run setup` 就行，已有的白板都在。
 
 不想回答问题、写进脚本里的话：
 
 ```sh
-CLOUDFLARE_API_TOKEN=… npm run setup -- --yes --name longtable --team-password '…'
+CLOUDFLARE_API_TOKEN=… npm run setup -- --yes --name longtable
 ```
 
 **其他方式：** 上面的 **Deploy to Cloudflare** 按钮（它会把仓库复制到你的 GitHub 账号再部署，
-所以要求这个仓库是公开的）；在你自己的仓库里用 GitHub Actions 部署；或者手动
+不用令牌，也不用装 Node）；在你自己的仓库里用 GitHub Actions 部署；或者手动
 `npx wrangler login` 再 `npm run deploy`。每种方式的细节，以及绑定自己的域名、免费套餐够用多少、
 数据存在哪，都在 [DEPLOY.md](DEPLOY.md)（英文）里。
+
+### 部署完之后
+
+> [!IMPORTANT]
+> - **大约一分钟。** 用 Deploy to Cloudflare 按钮，从第一步到上线，我们试的那次一共 57 秒。
+> - **网址在部署日志的最后**，和密码一起框在一个方框里，长这样：
+>   `https://longtable.<你的子域名>.workers.dev`。也可以在 *Workers → longtable → Settings → Domains & Routes* 里找到。
+> - **密码是 `longtable`。** 每个新部署的 Longtable 都从它开始，所以别人就算知道了你的网址，
+>   看到的也只是输密码的页面，看不到你的白板。这个密码写在这份 README 里谁都能看到，
+>   所以你第一次进去时 Longtable 会请你改成自己的；以后也能在 *Your boards → Site password…* 里改。
+> - **发给别人的白板链接不需要这个密码。** 链接里自带的密钥就是那块白板的锁。
+
+部署日志最后长这样（用 Deploy to Cloudflare 按钮时，这里的时间只算部署那一步，前面几步在 Cloudflare 的日志里）：
+
+```text
+────────────────────────────────────────────────────────────────
+  Longtable is live · deployed in 17 s
+
+  Address   https://longtable.your-subdomain.workers.dev
+  Password  longtable
+            The initial password, the same for every new Longtable.
+            Open the address, come in with it, and it asks you to pick
+            your own. Already picked one? Then it's yours.
+
+  Board links you send people open without the password.
+────────────────────────────────────────────────────────────────
+```
+
+忘了密码，或者想让密码固定下来？在 *Workers → 你的 worker → Settings → Variables and Secrets*
+里加一个 secret，名字叫 `SITE_PASSWORD`：它优先于在站内改的密码。设成 `off` 就是谁都能进。
+细节见 [DEPLOY.md](DEPLOY.md#who-can-get-in)。
 
 ## 快捷键
 
@@ -262,9 +295,9 @@ npm run build && npm run e2e
 端到端测试会自己启动一个本地 Worker，用 Playwright 同时开几个浏览器和一部手机
 （第一次需要 `npx playwright install chromium`）。它覆盖多人实时编辑、整理、导出，
 以及所有隐私规则：没有密钥和瞎编密钥的链接、只读链接（也包括直接连服务器的脚本）、
-密码和输错之后的等待、同时发出的一堆猜测、换链接、清空、删除、团队密码、建白板的频率限制和安全响应头。
+密码和输错之后的等待、同时发出的一堆猜测、换链接、清空、删除、站点访问密码（陌生人、白板链接、初始密码、改成自己的）、建白板的频率限制和安全响应头。
 它还会贴一段聊天记录，检查日历订阅和它的密钥，以及下周的便签单独排一周、名字标签、「只看我的」、导出图片和 MCP 客户端在白板上排计划；测已经部署好的站点时，聊天记录会真的交给 Workers AI 读。
-要测已经部署好的站点：`BASE_URL=https://… npm run e2e`（设了团队密码就再加 `TEAM_PASSWORD=…`）。
+要测已经部署好的站点：`BASE_URL=https://… npm run e2e`（密码不是 `longtable` 的话再加 `SITE_PASSWORD=…`；测试不会改已部署站点的密码）。
 
 ## 怎么做的
 
@@ -275,7 +308,7 @@ flowchart LR
   end
   subgraph cf [你的 Cloudflare 账号]
     worker["Worker<br/>页面文件和 /api"]
-    gate["创建前检查<br/>团队密码、频率限制"]
+    gate["站点访问密码<br/>和创建前检查"]
     room["白板房间 · Durable Object<br/>SQLite、可休眠的 WebSocket"]
     ai["Workers AI<br/>读贴进来的聊天记录"]
     br["浏览器渲染<br/>把一周画成图"]

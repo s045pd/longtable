@@ -164,3 +164,63 @@ export class Tries {
 export async function addressKey(ip: string | null | undefined): Promise<string> {
   return (await sha256(`longtable:${ip ?? "local"}`)).slice(0, 20);
 }
+
+// ------------------------------------------------------------- the site's own password
+//
+// A Longtable asks for a password before anything else: the front page, the
+// demo and starting boards. It starts as INITIAL_SITE_PASSWORD, the same for
+// every new Longtable and written in the README, so the first person in is
+// asked to pick their own. Whoever runs it can instead fix one in Cloudflare
+// (the SITE_PASSWORD secret, which then wins), or set that to "off" to open
+// the site to everyone. Board links never need it: their own keys are the lock.
+
+/** The password every new Longtable starts with, until someone picks their own on the site. */
+export const INITIAL_SITE_PASSWORD = "longtable";
+
+/** What the site keeps about its password, in the room set aside for it. */
+export interface SiteLock {
+  /** Signs the cookie that lets a browser back in without typing the password. */
+  secret: string;
+  /** The password picked on the site, as PBKDF2-SHA-256 of it with its own salt. */
+  pw?: NonNullable<Lock["pw"]>;
+}
+
+/**
+ * How the site is kept: open to everyone, the initial password, one picked on
+ * the site, or one fixed in Cloudflare (SITE_PASSWORD), which wins.
+ */
+export type SiteKind = "open" | "initial" | "picked" | "fixed";
+
+export function siteKind(fixed: string | undefined, lock: SiteLock): SiteKind {
+  if (fixed) return /^\s*(off|none)\s*$/i.test(fixed) ? "open" : "fixed";
+  return lock.pw ? "picked" : "initial";
+}
+
+/** Whether a password opens the site. */
+export async function siteCheck(kind: SiteKind, fixed: string | undefined, lock: SiteLock, given: unknown): Promise<boolean> {
+  if (typeof given !== "string" || !given.length || given.length > PASSWORD_MAX) return false;
+  if (kind === "open") return true;
+  if (kind === "fixed") return same(await sha256(given), await sha256(fixed ?? ""));
+  if (kind === "picked") return checkPassword(given, lock.pw!);
+  return same(given, INITIAL_SITE_PASSWORD);
+}
+
+/**
+ * The cookie's value: a signature of which password is in force, so a new
+ * password (picked on the site or fixed in Cloudflare) sends everyone back
+ * to the password screen.
+ */
+export async function siteToken(kind: SiteKind, fixed: string | undefined, lock: SiteLock): Promise<string> {
+  const which = kind === "fixed" ? `fixed:${await sha256(fixed ?? "")}` : kind === "picked" ? `picked:${lock.pw!.hash}` : kind;
+  const key = await crypto.subtle.importKey("raw", enc.encode(lock.secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", key, enc.encode(`longtable-site:${which}`));
+  return b64(sig).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/** Why a new site password was refused. */
+export function weakSitePassword(next: unknown): string | null {
+  if (typeof next !== "string" || next.length < PASSWORD_MIN) return `Make it at least ${PASSWORD_MIN} characters.`;
+  if (next.length > PASSWORD_MAX) return `Make it at most ${PASSWORD_MAX} characters.`;
+  if (next.trim().toLowerCase() === INITIAL_SITE_PASSWORD) return "That’s the password every new Longtable starts with. Pick another.";
+  return null;
+}

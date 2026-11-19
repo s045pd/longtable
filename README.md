@@ -19,6 +19,8 @@ calendar. Your AI assistant can plan on it too, over MCP.
 [![Runs on the Cloudflare free plan](https://img.shields.io/badge/runs%20on-Cloudflare%20free%20plan-FFB38A?style=flat-square&labelColor=17181C)](DEPLOY.md#what-the-free-plan-covers)
 [![No accounts](https://img.shields.io/badge/accounts-none-9DF0C4?style=flat-square&labelColor=17181C)](#private-by-default)
 
+**Deploys in about a minute.** The log ends with your address and the password: **`longtable`**, until you pick your own. [After you deploy ↓](#after-you-deploy)
+
 <img src="docs/images/longtable.webp" width="860" alt="Five people plan a bakery’s opening week on one board: cursors with name flags write notes, tick a checklist and drop photos, then Tidy up springs every note into seven day columns and “Opening week, sorted.” rises underneath." />
 
 <sub>The film Longtable grew out of: five made-up people plan a fictional bakery’s opening week, then Ana presses Tidy up. The front page plays the same story live.</sub>
@@ -208,7 +210,7 @@ takes boards off this device's list without touching them.
 | Calendar links | A key of their own that can only read the notes that name a day. New links or a new password switch the old one off. |
 | AI assistants (MCP) | A key of their own in the board's MCP address, shown only to people who can edit. It can change the board like the edit link; new links or a new password switch it off. One address can make 600 requests an hour to a board. |
 | Pasted chats | Read by Workers AI on your own account and then dropped: never stored, never logged. A watch link can't send one. |
-| Starting boards | Optional **team password**. Without one, an address can still start only 30 boards an hour. |
+| The site | A **password** in front of the front page, the demo and new boards: `longtable` at first, then your own. Board links don't need it. Wrong tries wait like a board's, and one address can start at most 30 boards an hour. |
 | The pages | Strict Content-Security-Policy, no referrer, no framing, and every page asks not to be indexed. |
 | Deleting | Erases the board's storage. Only the date it was deleted is kept, so its link can say so. |
 
@@ -237,18 +239,53 @@ service is involved.
    ```
 
    Paste the token when asked (it isn't shown or saved). Setup finds your
-   account, asks for a name and an optional team password, then builds,
-   deploys and checks the result. It ends with your address:
-   `https://longtable.<your-subdomain>.workers.dev`.
+   account and asks for a name, then builds, deploys and checks the result.
+   It ends with your address and password (see below).
 
 To update later, get the new code and run `npm run setup` again. Boards are kept.
 
 **Other ways:** the **Deploy to Cloudflare** button above (it copies the
-repository into your GitHub account, so it needs this repository to be
-public), a GitHub Actions workflow that deploys from your own copy, or
+repository into your GitHub account and deploys it, no token or Node
+needed), a GitHub Actions workflow that deploys from your own copy, or
 `npx wrangler login` and `npm run deploy` by hand. [DEPLOY.md](DEPLOY.md)
 covers each one, plus your own domain, what the free plan covers and where
 the data is kept.
+
+### After you deploy
+
+> [!IMPORTANT]
+> - **It takes about a minute.** With the Deploy to Cloudflare button, from
+>   the first step to live: 57 seconds when we tried it.
+> - **Your address is at the end of the deploy log**, in a box with the
+>   password. It looks like `https://longtable.<your-subdomain>.workers.dev`.
+>   It's also under *Workers → longtable → Settings → Domains & Routes*.
+> - **The password is `longtable`.** Every new Longtable starts with it, so
+>   whoever finds your address meets a password screen, not your boards. It's
+>   written here for anyone to read, so the first time you come in, Longtable
+>   asks you to pick your own. Later: *Your boards → Site password…*
+> - **Board links you send people open without it.** Their own keys are the lock.
+
+The deploy log ends like this (with *Deploy to Cloudflare* the time is the
+deploy step's own; Cloudflare's log shows the steps before it):
+
+```text
+────────────────────────────────────────────────────────────────
+  Longtable is live · deployed in 17 s
+
+  Address   https://longtable.your-subdomain.workers.dev
+  Password  longtable
+            The initial password, the same for every new Longtable.
+            Open the address, come in with it, and it asks you to pick
+            your own. Already picked one? Then it's yours.
+
+  Board links you send people open without the password.
+────────────────────────────────────────────────────────────────
+```
+
+Forgot the password, or want it fixed for everyone? Set the secret
+`SITE_PASSWORD` under *Workers → your worker → Settings → Variables and
+Secrets*: it wins over the one picked on the site. `off` opens the site to
+everyone. [DEPLOY.md](DEPLOY.md#who-can-get-in) has the details.
 
 ## Keyboard
 
@@ -288,13 +325,15 @@ phone with Playwright (`npx playwright install chromium` once if needed). It
 covers live editing between people, the tidy, the export, and the privacy
 rules: keyless and made-up links, the watch link (also against a script
 talking to the server directly), passwords and the wait after wrong ones,
-guesses sent all at once, new links, clear, delete, the team password, the
+guesses sent all at once, new links, clear, delete, the site's password
+(strangers, board links, the initial one, picking and changing it), the
 limit on new boards and the security headers. It also pastes a chat, checks
 the calendar feed and its key, that notes dated next week get a week of
 their own, name tags, *Just mine* and the picture, and an MCP client planning
 on a board. Against a deployed Longtable the chat goes to
 real Workers AI. To test a deployed Longtable:
-`BASE_URL=https://… npm run e2e` (add `TEAM_PASSWORD=…` if it has one).
+`BASE_URL=https://… npm run e2e` (add `SITE_PASSWORD=…` if its password
+isn't `longtable`; the run never changes a deployed site's password).
 
 ## How it is built
 
@@ -305,7 +344,7 @@ flowchart LR
   end
   subgraph cf [Your Cloudflare account]
     worker["Worker<br/>app files and /api"]
-    gate["Start check<br/>team password, rate limit"]
+    gate["Site password<br/>and the start check"]
     room["Board room · Durable Object<br/>SQLite, hibernating WebSockets"]
     ai["Workers AI<br/>reads pasted chats"]
     br["Browser Rendering<br/>draws the week"]

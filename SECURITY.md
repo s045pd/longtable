@@ -24,7 +24,8 @@ public, with credit if you'd like it.
 - Changing a board with a watch link, or doing owner things without the
   owner link.
 - Getting past a board's password, the wait after wrong tries, or a
-  deployment's team password.
+  deployment's site password (other than with the initial `longtable` on a
+  Longtable whose owner hasn't changed it yet).
 - Reading a board's calendar feed without its calendar link, or with one
   that new links or a new password switched off.
 - Reading or changing a board over MCP without its MCP address, or with one

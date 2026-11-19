@@ -8,7 +8,8 @@ import { PLAN_MAX_CHARS, linesToNotes, localIso } from "../shared/plan";
 import { REACTIONS } from "../shared/schema";
 import type { AdminAct, DeniedReason, NoteItem, PlanNote, PlanTrouble, ReactionKind } from "../shared/types";
 import { escapeHtml, type Board, type Tool } from "./app";
-import { deleteBoard, myBoards, nextBoard, setFlash } from "./boards";
+import { ON_SERVER, deleteBoard, myBoards, nextBoard, setFlash } from "./boards";
+import { changeSitePassword, siteKnown, siteStatus, troubleText } from "../site";
 import { boardLink, forgetBoard, recentBoards } from "./identity";
 import type { LinkStatus } from "./net";
 import { reactionIcon } from "./people";
@@ -271,7 +272,10 @@ export class Chrome {
       if (act === "settings") this.settings();
       else if (act === "share") this.share();
       else if (act === "manage") this.manageBoards();
+      else if (act === "site") this.sitePassword();
     });
+    // Whether this browser is in on the site's password, for "Site password…" in Your boards.
+    if (ON_SERVER) siteStatus();
     $(".export").addEventListener("click", () => this.exportWeek());
     this.pill.addEventListener("click", () => board.tidy());
     this.top.querySelector(".avatars")!.addEventListener("click", (e) => {
@@ -638,6 +642,7 @@ export class Chrome {
     const when = (at: number) => new Date(at).toLocaleDateString(undefined, { day: "numeric", month: "short" });
     const others = recentBoards().filter((r) => r.id !== here);
     const title = boardTitle(b.state.meta);
+    const site = ON_SERVER ? siteKnown() : null;
     this.boardsMenu.innerHTML = `
       <div class="menu-head">Your boards<small>on this device</small></div>
       ${here ? `<div class="here" aria-current="page"><i style="--c:${b.me.color}"></i><span>${escapeHtml(title)}</span><small>Open now</small></div>` : ""}
@@ -647,6 +652,7 @@ export class Chrome {
       <hr />
       <a href="/new?template=blank" role="menuitem" class="act">${icon("plus")}<span>New blank board</span></a>
       ${here ? `<button data-menu="settings" role="menuitem" class="act">${icon("gear")}<span>Board settings</span></button>` : ""}
+      ${site?.gate && site.in ? `<button data-menu="site" role="menuitem" class="act">${icon("key")}<span>Site password…</span></button>` : ""}
       <a href="/" role="menuitem" class="act">${icon("left")}<span>Front page and demo</span></a>`;
     this.boardsMenu.classList.add("open");
     by.setAttribute("aria-expanded", "true");
@@ -1127,6 +1133,56 @@ export class Chrome {
    * Manage boards: every board opened on this device, to delete several you
    * own at once, or take any off this device's list.
    */
+  /**
+   * This Longtable's own password (not a board's): the one in front of the
+   * front page, the demo and new boards. A new one needs the current one.
+   */
+  sitePassword() {
+    const site = siteKnown();
+    if (site?.fixed) {
+      this.dialog(
+        `<h2>Site password</h2>
+        <p class="muted">This Longtable’s password is set in Cloudflare, as the <code>SITE_PASSWORD</code> secret, so it can’t be changed here. Change it there: <i>Workers → your worker → Settings → Variables and Secrets</i>.</p>
+        <div class="actions"><button class="btn primary" type="button" data-close>OK</button></div>`,
+        "site-dialog",
+      );
+      return;
+    }
+    const d = this.dialog(
+      `<h2>Site password</h2>
+      <p class="muted">${site?.initial ? "It’s still <b>longtable</b>, the password every new Longtable starts with, and anyone who has read the README could guess it. " : ""}It keeps the front page, the demo and new boards to people who know it. Board links open without it. After a change, everyone else types the new one once on each device.</p>
+      <form class="site-change">
+        <label class="field"><span>Current password</span><input type="password" name="current" autocomplete="current-password" maxlength="200" required /></label>
+        <label class="field"><span>New password</span><input type="password" name="next" autocomplete="new-password" minlength="6" maxlength="200" required /></label>
+        <label class="field"><span>New password again</span><input type="password" name="again" autocomplete="new-password" minlength="6" maxlength="200" required /></label>
+        <p class="form-error" aria-live="polite"></p>
+        <div class="actions"><button type="button" class="btn ghost" data-close>Cancel</button><button class="btn primary" type="submit">Change it</button></div>
+      </form>`,
+      "site-dialog",
+    );
+    const form = d.el.querySelector<HTMLFormElement>("form")!;
+    const [current, next, again] = [...form.querySelectorAll("input")];
+    const error = form.querySelector<HTMLElement>(".form-error")!;
+    const button = form.querySelector<HTMLButtonElement>("button[type=submit]")!;
+    setTimeout(() => current.focus(), 60);
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (next.value !== again.value) {
+        error.textContent = "The two new ones don’t match.";
+        return again.select();
+      }
+      button.disabled = true;
+      const a = await changeSitePassword(current.value, next.value);
+      button.disabled = false;
+      if (!a.ok) {
+        error.textContent = troubleText(a, "That’s not the current password.");
+        return;
+      }
+      d.close();
+      this.toast("Site password changed. Everyone else types the new one once.");
+    });
+  }
+
   manageBoards() {
     const b = this.board;
     this.closeMenus();

@@ -12,9 +12,30 @@ import { LIMITS, cleanColor, cleanCoord, cleanEffect, cleanName, cleanOp, cleanP
 import { BoardState } from "../src/shared/state";
 import { withStrokes } from "../src/shared/attach";
 import { TEMPLATES, makeTemplate, type TemplateName } from "../src/shared/templates";
-import type { AdminAct, ClientMessage, DeniedReason, Effect, Item, Meta, Op, Person, PlanNote, PlanTrouble, Presence, Role, ServerMessage } from "../src/shared/types";
+import type { AdminAct, ClientMessage, DeniedReason, Effect, Item, Meta, Op, Person, PlanNote, PlanTrouble, Presence, Role, ServerMessage, SiteStatus } from "../src/shared/types";
 import { newKey, randomId } from "../src/shared/ids";
-import { FORGET_TRIES_MS, PASSWORD_MAX, PASSWORD_MIN, Tries, accessFor, addressKey, checkPassword, cleanZone, hashPassword, newLock, roleFor, same, sha256, type Lock, type TryRecord, type TryStore } from "./access";
+import {
+  FORGET_TRIES_MS,
+  PASSWORD_MAX,
+  PASSWORD_MIN,
+  Tries,
+  accessFor,
+  addressKey,
+  checkPassword,
+  cleanZone,
+  hashPassword,
+  newLock,
+  roleFor,
+  same,
+  siteCheck,
+  siteKind,
+  siteToken,
+  weakSitePassword,
+  type Lock,
+  type SiteLock,
+  type TryRecord,
+  type TryStore,
+} from "./access";
 import { fileStem, toIcs } from "../src/shared/exporter";
 import { PLAN_MAX_CHARS, planMessages, readPlan } from "../src/shared/plan";
 import { handleMcp, mcpResponse, preflight } from "./mcp";
@@ -23,7 +44,13 @@ import { BrowserBusy, drawWeek } from "./picture";
 export interface Env {
   BOARDS: DurableObjectNamespace<BoardRoom>;
   ASSETS: Fetcher;
-  /** When set, starting a board needs this password (see DEPLOY.md). */
+  /**
+   * The site's password, fixed in Cloudflare: it wins over the one picked on
+   * the site, and "off" opens the site to everyone. Unset: the initial
+   * password, until someone picks their own on the site (see DEPLOY.md).
+   */
+  SITE_PASSWORD?: string;
+  /** The old name of SITE_PASSWORD, from when it only guarded starting boards. */
   CREATE_PASSWORD?: string;
   /** Workers AI, which reads a pasted chat into notes. Missing in `wrangler dev --local`: boards then read the chat line by line. */
   AI?: { run(model: string, input: unknown): Promise<unknown> };
@@ -96,6 +123,12 @@ const BOARDS_PER_HOUR = 30;
 
 /** What the check in front of starting a board says. */
 export type StartCheck = { ok: true } | { ok: false; why: "password" | "busy"; wait?: number };
+
+/** What giving the site's password gets: the cookie's value, or how long to wait. */
+export type SiteUnlock = { ok: true; token: string; initial: boolean } | { ok: false; wait?: number };
+
+/** What changing the site's password gets. */
+export type SiteChange = { ok: true; token: string } | { ok: false; why: "fixed" | "open" | "wrong" | "weak"; message?: string; wait?: number };
 
 /** Wrong tries kept in the room's own SQLite, so they outlast the room sleeping. */
 class SqlTryStore implements TryStore {
@@ -224,23 +257,78 @@ export class BoardRoom extends DurableObject<Env> {
 
   /**
    * The check in front of starting a board. It runs in one room set aside for
-   * it: the team password, when the deployment has one, with wrong guesses
-   * counted (and slowed) like a board's; then at most BOARDS_PER_HOUR boards
-   * an hour from one address.
+   * it: the site's password (the browser's cookie, or the password itself
+   * from a script), with wrong guesses counted (and slowed) like a board's;
+   * then at most BOARDS_PER_HOUR boards an hour from one address.
    */
-  async mayStart(ip: string | null, given: unknown, expected: string | undefined): Promise<StartCheck> {
+  async mayStart(ip: string | null, given: unknown, fixed: string | undefined, token?: string | null): Promise<StartCheck> {
     const who = await addressKey(ip);
-    if (expected) {
+    const lock = this.siteLock();
+    const kind = siteKind(fixed, lock);
+    if (kind !== "open" && !same(token, await siteToken(kind, fixed, lock))) {
+      if (given === undefined || given === null || given === "") return { ok: false, why: "password" };
       const wait = this.tries.wait(who);
       if (wait) return { ok: false, why: "password", wait };
       const next = this.tries.fail(who);
-      if (typeof given !== "string" || !same(await sha256(given), await sha256(expected))) {
-        return { ok: false, why: "password", ...(next ? { wait: next } : {}) };
-      }
+      if (!(await siteCheck(kind, fixed, lock, given))) return { ok: false, why: "password", ...(next ? { wait: next } : {}) };
       this.tries.clear(who);
     }
     const wait = this.count("started", who, BOARDS_PER_HOUR);
     return wait ? { ok: false, why: "busy", wait } : { ok: true };
+  }
+
+  /** The site's lock, made the first time anyone asks (in the room set aside for it). */
+  private siteLock(): SiteLock {
+    const raw = this.row("site");
+    if (raw) return JSON.parse(raw) as SiteLock;
+    const lock: SiteLock = { secret: newKey() + newKey() };
+    this.ctx.storage.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('site', ?)", JSON.stringify(lock));
+    return lock;
+  }
+
+  /** Whether a browser's cookie lets it in. Only a browser that is in hears whether it's still the initial password. */
+  async siteStatus(fixed: string | undefined, token: string | null): Promise<SiteStatus> {
+    const lock = this.siteLock();
+    const kind = siteKind(fixed, lock);
+    if (kind === "open") return { gate: false, in: true };
+    if (!same(token, await siteToken(kind, fixed, lock))) return { gate: true, in: false };
+    return { gate: true, in: true, initial: kind === "initial", fixed: kind === "fixed" };
+  }
+
+  /** Someone gives the site's password. Wrong guesses are counted and slowed down like a board's. */
+  async siteUnlock(ip: string | null, fixed: string | undefined, given: unknown): Promise<SiteUnlock> {
+    const lock = this.siteLock();
+    const kind = siteKind(fixed, lock);
+    if (kind === "open") return { ok: true, token: "", initial: false };
+    const who = await addressKey(ip);
+    const wait = this.tries.wait(who);
+    if (wait) return { ok: false, wait };
+    const next = this.tries.fail(who);
+    if (!(await siteCheck(kind, fixed, lock, given))) return { ok: false, ...(next ? { wait: next } : {}) };
+    this.tries.clear(who);
+    return { ok: true, token: await siteToken(kind, fixed, lock), initial: kind === "initial" };
+  }
+
+  /**
+   * Pick a new site password, with the current one. Everyone else has to
+   * give the new one once; whoever changed it gets a new cookie.
+   */
+  async siteChange(ip: string | null, fixed: string | undefined, current: unknown, next: unknown): Promise<SiteChange> {
+    const lock = this.siteLock();
+    const kind = siteKind(fixed, lock);
+    if (kind === "open") return { ok: false, why: "open" };
+    if (kind === "fixed") return { ok: false, why: "fixed" };
+    const weak = weakSitePassword(next);
+    if (weak) return { ok: false, why: "weak", message: weak };
+    const who = await addressKey(ip);
+    const wait = this.tries.wait(who);
+    if (wait) return { ok: false, why: "wrong", wait };
+    const after = this.tries.fail(who);
+    if (!(await siteCheck(kind, fixed, lock, current))) return { ok: false, why: "wrong", ...(after ? { wait: after } : {}) };
+    this.tries.clear(who);
+    lock.pw = await hashPassword(next as string);
+    this.ctx.storage.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('site', ?)", JSON.stringify(lock));
+    return { ok: true, token: await siteToken("picked", fixed, lock) };
   }
 
   /**

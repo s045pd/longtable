@@ -3215,3 +3215,45 @@ a.btn {
   margin: 4px 8px 4px;
   color: var(--muted);
 }
+
+/* The site's password, in front of the front page, the demo and new boards. */
+.landing main.site-gate,
+.landing main.site-pick {
+  flex: none;
+  max-width: 600px;
+  margin: 10vh auto 48px;
+}
+.site-gate p,
+.site-pick p {
+  color: var(--muted);
+  line-height: 1.5;
+}
+.site-gate p b,
+.site-pick p b {
+  color: var(--chalk);
+  font-family: var(--mono);
+  font-weight: 600;
+}
+.site-gate .gate-boards {
+  max-width: 360px;
+  margin-top: 28px;
+}
+.site-pick .field + .field {
+  margin-top: 4px;
+}
+.site-dialog .card {
+  width: min(460px, 100%);
+}
+.site-dialog p b {
+  font-family: var(--mono);
+}
+@media (max-width: 520px) {
+  .landing main.site-gate,
+  .landing main.site-pick {
+    margin-top: 4vh;
+  }
+  .site-gate h1,
+  .site-pick h1 {
+    font-size: 32px;
+  }
+}

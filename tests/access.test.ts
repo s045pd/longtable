@@ -1,5 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { FORGET_TRIES_MS, MemoryTryStore, Tries, accessFor, addressKey, checkPassword, hashPassword, newLock, roleFor, same, sha256 } from "../worker/access";
+import {
+  FORGET_TRIES_MS,
+  INITIAL_SITE_PASSWORD,
+  MemoryTryStore,
+  Tries,
+  accessFor,
+  addressKey,
+  checkPassword,
+  hashPassword,
+  newLock,
+  roleFor,
+  same,
+  sha256,
+  siteCheck,
+  siteKind,
+  siteToken,
+  weakSitePassword,
+  type SiteLock,
+} from "../worker/access";
+import bannerSource from "../scripts/banner.mjs?raw";
 import { keysFromHash } from "../src/board/identity";
 import { KEY } from "../src/shared/ids";
 
@@ -108,5 +127,52 @@ describe("links", () => {
     expect(keysFromHash(`#o=${k}`)).toEqual({ owner: k });
     expect(keysFromHash("#k=short")).toEqual({});
     expect(keysFromHash("")).toEqual({});
+  });
+});
+
+describe("the site's password", () => {
+  const lock: SiteLock = { secret: "s".repeat(52) };
+
+  it("starts as the initial one, the same the deploy prints", async () => {
+    expect(INITIAL_SITE_PASSWORD).toBe("longtable");
+    // What the deploy prints (scripts/banner.mjs) is the same password.
+    expect(bannerSource).toContain(`INITIAL_PASSWORD = "${INITIAL_SITE_PASSWORD}"`);
+    expect(siteKind(undefined, lock)).toBe("initial");
+    expect(await siteCheck("initial", undefined, lock, "longtable")).toBe(true);
+    expect(await siteCheck("initial", undefined, lock, "Longtable")).toBe(false);
+    expect(await siteCheck("initial", undefined, lock, "")).toBe(false);
+  });
+
+  it("is the one picked on the site once there is one, unless Cloudflare fixes one", async () => {
+    const picked: SiteLock = { ...lock, pw: await hashPassword("our-team-1") };
+    expect(siteKind(undefined, picked)).toBe("picked");
+    expect(await siteCheck("picked", undefined, picked, "our-team-1")).toBe(true);
+    expect(await siteCheck("picked", undefined, picked, "longtable")).toBe(false);
+    expect(siteKind("fixed-one", picked)).toBe("fixed");
+    expect(await siteCheck("fixed", "fixed-one", picked, "fixed-one")).toBe(true);
+    expect(await siteCheck("fixed", "fixed-one", picked, "our-team-1")).toBe(false);
+    expect(siteKind("off", picked)).toBe("open");
+    expect(siteKind(" OFF ", lock)).toBe("open");
+    expect(siteKind("none", lock)).toBe("open");
+  });
+
+  it("signs a cookie that stops working when the password changes", async () => {
+    const a = await siteToken("initial", undefined, lock);
+    expect(a).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(await siteToken("initial", undefined, lock)).toBe(a);
+    expect(await siteToken("initial", undefined, { secret: "t".repeat(52) })).not.toBe(a);
+    const one: SiteLock = { ...lock, pw: await hashPassword("our-team-1") };
+    const two: SiteLock = { ...lock, pw: await hashPassword("our-team-2") };
+    const b = await siteToken("picked", undefined, one);
+    expect(b).not.toBe(a);
+    expect(await siteToken("picked", undefined, two)).not.toBe(b);
+    expect(await siteToken("fixed", "x-123456", lock)).not.toBe(await siteToken("fixed", "y-123456", lock));
+  });
+
+  it("won't take a short one, or the initial one again", () => {
+    expect(weakSitePassword("short")).toMatch(/at least 6/);
+    expect(weakSitePassword(" LongTable ")).toMatch(/starts with/);
+    expect(weakSitePassword(42)).toMatch(/at least 6/);
+    expect(weakSitePassword("our-team-1")).toBeNull();
   });
 });

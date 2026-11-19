@@ -4,8 +4,9 @@
 #    Actions → New repository secret, name CLOUDFLARE_API_TOKEN, value your
 #    token (DEPLOY.md has a link that makes one with the right permissions).
 #    Optional secrets: CLOUDFLARE_ACCOUNT_ID (when the token sees several
-#    accounts) and LONGTABLE_TEAM_PASSWORD (only people who know it can start
-#    boards).
+#    accounts) and LONGTABLE_SITE_PASSWORD (fixes the site's password instead
+#    of the initial "longtable" you change on the site; "off" opens it to
+#    everyone).
 # 2. Actions → Deploy to Cloudflare → Run workflow.
 #
 # To deploy on every push to main as well, add the repository variable
@@ -40,6 +41,7 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          LONGTABLE_SITE_PASSWORD: ${{ secrets.LONGTABLE_SITE_PASSWORD }}
           LONGTABLE_TEAM_PASSWORD: ${{ secrets.LONGTABLE_TEAM_PASSWORD }}
           WORKER_NAME: ${{ inputs.name || vars.WORKER_NAME || 'longtable' }}
         run: node scripts/deploy-cloudflare.mjs --yes --name "$WORKER_NAME"

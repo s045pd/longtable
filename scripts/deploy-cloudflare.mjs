@@ -5,20 +5,25 @@
 //   npm run setup
 //
 // It asks for a Cloudflare API token (or reads CLOUDFLARE_API_TOKEN), finds
-// your account, installs, builds, deploys, optionally sets a team password,
-// checks the result and prints your address. Run it again to update; it
-// remembers the account and name (never the token) in .longtable-deploy.json.
+// your account, installs, builds, deploys, checks the result and prints your
+// address and password (the initial one is "longtable"; the site asks you to
+// pick your own). Run it again to update; it remembers the account and name
+// (never the token) in .longtable-deploy.json.
 //
 // Without questions (CI, scripts):
 //   CLOUDFLARE_API_TOKEN=… npm run setup -- --yes [--name longtable] [--account <id>]
-//                                                 [--team-password <pw> | --no-team-password]
-// (CLOUDFLARE_ACCOUNT_ID and LONGTABLE_TEAM_PASSWORD work as well as the flags.)
+//                                                 [--password <pw> | --password off | --password reset]
+// --password fixes the site's password in Cloudflare (the SITE_PASSWORD secret);
+// "off" opens the site to everyone; "reset" removes it, so the one picked on
+// the site counts again (or the initial one, if none was).
+// (CLOUDFLARE_ACCOUNT_ID and LONGTABLE_SITE_PASSWORD work as well as the flags.)
 // This file uses nothing but Node itself, so it runs before `npm install`.
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
+import { INITIAL_PASSWORD, askHealth, banner } from "./banner.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 process.chdir(root);
@@ -61,6 +66,7 @@ function parseArgs(argv) {
   return out;
 }
 const args = parseArgs(process.argv.slice(2));
+const started = Date.now();
 const interactive = process.stdin.isTTY && !args.yes;
 
 function ask(question, { hidden = false, def = "" } = {}) {
@@ -186,19 +192,19 @@ name = name.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").s
 const url = `https://${name}.${subdomain}.workers.dev`;
 say(`${green("✓")} ${url}`);
 
-// 5. Who may start boards.
-step(4, "Team password (optional)");
-say("With one, only people who know it can start new boards on your Longtable. People you send a board link to never need it.");
-let team = typeof args["team-password"] === "string" ? args["team-password"] : process.env.LONGTABLE_TEAM_PASSWORD || undefined;
-const noTeam = !!args["no-team-password"];
-if (team === undefined && !noTeam) {
-  team = await ask(saved.name === name ? "Team password (Enter keeps the current setting, “none” removes it):" : "Team password (Enter for none):", { hidden: true });
+// 5. The site's password: left as it is unless asked (the old team-password flags still work).
+let password = [args.password, args["team-password"], process.env.LONGTABLE_SITE_PASSWORD, process.env.LONGTABLE_TEAM_PASSWORD].find((v) => typeof v === "string" && v !== "");
+if (args["no-team-password"]) password = "off";
+/** off: no password; reset: back to the one picked on the site; set: fix this one in Cloudflare. */
+const mode = password === undefined ? undefined : /^\s*(off|none)\s*$/i.test(password) ? "off" : /^\s*reset\s*$/i.test(password) ? "reset" : "set";
+if (mode === "set") {
+  if (password.length < 6) fail("Make the password at least 6 characters.");
+  if (password.trim().toLowerCase() === INITIAL_PASSWORD) fail(`“${INITIAL_PASSWORD}” is the password every new Longtable starts with. Pick another.`);
 }
-if (team && team !== "none" && team.length < 6) fail("Make the team password at least 6 characters.");
 
 // 6. Install, build, deploy.
 const env = { CLOUDFLARE_API_TOKEN: token, CLOUDFLARE_ACCOUNT_ID: account.id, WRANGLER_SEND_METRICS: "false" };
-step(5, "Install and build");
+step(4, "Install and build");
 if (!existsSync("node_modules/wrangler") || !existsSync("node_modules/vite")) {
   const inst = await run("npm", ["ci", "--no-audit", "--no-fund"]);
   if (inst.code !== 0) fail("npm couldn't install the packages (see above).");
@@ -206,42 +212,39 @@ if (!existsSync("node_modules/wrangler") || !existsSync("node_modules/vite")) {
 const built = await run("npm", ["run", "build"]);
 if (built.code !== 0) fail("The build failed (see above).");
 
-step(6, "Deploy");
+step(5, "Deploy");
 const dep = await run("npx", ["wrangler", "deploy", "--name", name], { env });
 if (dep.code !== 0) fail("wrangler couldn't deploy (see above). If it's about permissions, make the token with the link in step 1.");
 
-if (noTeam || team === "none") {
-  await run("npx", ["wrangler", "secret", "delete", "CREATE_PASSWORD", "--name", name], { env: { ...env, CI: "true" }, quiet: true, input: "y\n" });
-  say(`${green("✓")} Anyone with the address can start boards.`);
-} else if (team) {
-  const s = await run("npx", ["wrangler", "secret", "put", "CREATE_PASSWORD", "--name", name], { env, quiet: true, input: team });
-  if (s.code !== 0) fail(`Couldn't set the team password:\n${s.out}`);
-  say(`${green("✓")} Team password set.`);
+const secret = (verb, key, input) => run("npx", ["wrangler", "secret", verb, key, "--name", name], { env: { ...env, CI: "true" }, quiet: true, input });
+if (mode === "reset") {
+  await secret("delete", "SITE_PASSWORD", "y\n");
+  await secret("delete", "CREATE_PASSWORD", "y\n");
+  say(`${green("✓")} The password is the one picked on the site again (or ${INITIAL_PASSWORD}, if none was).`);
+} else if (mode) {
+  const s = await secret("put", "SITE_PASSWORD", mode === "off" ? "off" : password);
+  if (s.code !== 0) fail(`Couldn't set the password:\n${s.out}`);
+  say(`${green("✓")} ${mode === "off" ? "No password: anyone with the address can open it." : "Password set in Cloudflare (SITE_PASSWORD)."}`);
 }
 
 writeFileSync(SAVED, `${JSON.stringify({ accountId: account.id, name, url }, null, 2)}\n`);
 
 // 7. Check it.
-step(7, "Check");
-// A team password just set or removed takes a few seconds to reach every Cloudflare location.
-const expect = noTeam || team === "none" ? false : team ? true : undefined;
+step(6, "Check");
+const seconds = Math.round((Date.now() - started) / 1000);
+// A password just set or removed takes a few seconds to reach every Cloudflare location.
+const want = mode === undefined ? undefined : mode === "off" ? "off" : mode === "reset" ? "site" : "fixed";
+const stateOf = (h) => (h.password === false ? "off" : h.fixed ? "fixed" : "site");
 let healthy = null;
 for (let i = 0; i < 20; i++) {
-  try {
-    const r = await fetch(`${url}/api/health`);
-    if (r.ok) healthy = await r.json();
-  } catch {
-    // the address can take a few seconds to appear
-  }
-  if (healthy && (expect === undefined || healthy.createPassword === expect)) break;
+  healthy = await askHealth(url, 0);
+  if (healthy && (want === undefined || stateOf(healthy) === want)) break;
   await new Promise((r) => setTimeout(r, 3000));
 }
-if (!healthy) {
-  say(`${red("!")} Deployed, but ${url} doesn't answer yet. New workers.dev addresses can take a few minutes; try it shortly.`);
-} else {
-  say(`${green("✓")} ${url} is up${healthy.createPassword ? ", with a team password" : ""}.`);
-}
+if (!healthy) say(`${red("!")} Deployed, but ${url} doesn't answer yet. New workers.dev addresses can take a few minutes; try it shortly.`);
+else say(`${green("✓")} ${url} is up.`);
 
-say(`\n${bold("Done.")} Open ${bold(url)} and press “Make your own board”.`);
+const state = healthy ? stateOf(healthy) : want;
+say(banner({ url, seconds, password: state === "off" ? "off" : state === "fixed" ? "fixed" : "initial" }));
 say(dim("Boards are stored in your Cloudflare account. To update later, get the new code and run npm run setup again."));
 say(dim("Your own domain, or a company login in front: see DEPLOY.md."));

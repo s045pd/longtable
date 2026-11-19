@@ -12,8 +12,9 @@
 // watch link can't change anything, even sent straight to the server; a
 // password asks everyone but the owner, wrong guesses are slowed down; new
 // links shut the old ones out; clearing can be undone; a deleted board is
-// gone for everyone; with a team password nobody else can start boards; the
-// security headers are there. A chat becomes a plan and the week a calendar;
+// gone for everyone; the site's password keeps strangers off the front page
+// and from starting boards, while board links still open, and the initial
+// password asks for one of your own; the security headers are there. A chat becomes a plan and the week a calendar;
 // notes with dates of their own go to their own weeks, whose a note is shows
 // as a tag, and the export, picture and calendar can be just one person's;
 // an AI assistant plans on the board over MCP. No page errors anywhere.
@@ -25,8 +26,11 @@ import { chromium, devices } from "playwright";
 
 const PORT = 8790 + Math.floor(Math.random() * 100);
 let base = process.env.BASE_URL;
-// The local server gets a team password; against BASE_URL, pass the deployment's own (if it has one).
-const TEAM = process.env.BASE_URL ? process.env.TEAM_PASSWORD : "e2e-team-password";
+// The site's password: the local server starts on the initial one; against BASE_URL, pass the deployment's own if it isn't.
+const INITIAL = "longtable";
+let PW = process.env.BASE_URL ? process.env.SITE_PASSWORD || process.env.TEAM_PASSWORD || INITIAL : INITIAL;
+/** The cookie that keeps a browser in on the site's password. */
+let TOKEN = null;
 let server = null;
 let store = null;
 /** Stop wrangler dev and everything it started, and drop its store. */
@@ -60,7 +64,7 @@ async function startServer() {
   store = mkdtempSync(join(tmpdir(), "longtable-e2e-"));
   // Its own process group, so stopping it also stops wrangler's workerd.
   // --local: no Cloudflare login needed; Workers AI is then off and chats are read line by line.
-  server = spawn("npx", ["wrangler", "dev", "--local", "--port", String(PORT), "--ip", "127.0.0.1", "--persist-to", store, "--var", `CREATE_PASSWORD:${TEAM}`], {
+  server = spawn("npx", ["wrangler", "dev", "--local", "--port", String(PORT), "--ip", "127.0.0.1", "--persist-to", store], {
     env: { ...process.env, CI: "true", WRANGLER_SEND_METRICS: "false" },
     stdio: ["ignore", "pipe", "pipe"],
     detached: true,
@@ -79,10 +83,24 @@ async function startServer() {
 }
 
 /** The browser's own line for a refusal this run asks for on purpose. */
-const expected = (name, text) => name === "Eve" && /status of 429/.test(text);
+const expected = (name, text) => (name === "Eve" && /status of 429/.test(text)) || (["Stranger", "Bo"].includes(name) && /status of 40[01]/.test(text));
 
-async function person(browser, name, color, options = { viewport: { width: 1280, height: 800 } }) {
+/** Give the site's password as a script would; returns the cookie's value (null when the site has none). */
+async function signIn(password) {
+  const r = await fetch(`${base}/api/site/unlock`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ password }) });
+  if (!r.ok) throw new Error(`the site's password didn't work (${r.status}); set SITE_PASSWORD`);
+  return /longtable_site=([^;]+)/.exec(r.headers.get("set-cookie") ?? "")?.[1] ?? null;
+}
+
+/** A browser that already gave the site's password, like anyone on the team. */
+async function inContext(browser, options) {
   const ctx = await browser.newContext(options);
+  if (TOKEN) await ctx.addCookies([{ name: "longtable_site", value: TOKEN, url: base }]);
+  return ctx;
+}
+
+async function person(browser, name, color, options = { viewport: { width: 1280, height: 800 } }, signedIn = true) {
+  const ctx = signedIn ? await inContext(browser, options) : await browser.newContext(options);
   await ctx.addInitScript(
     ([n, c]) => localStorage.setItem("longtable:me", JSON.stringify({ cid: `e2e-${n}`, name: n, color: c })),
     [name, color],
@@ -95,7 +113,7 @@ async function person(browser, name, color, options = { viewport: { width: 1280,
 
 const transformOf = (page, id) => page.$eval(`.item[data-id="${id}"]`, (e) => e.style.transform);
 
-const makeBoard = (template, password = TEAM) =>
+const makeBoard = (template, password = PW) =>
   fetch(`${base}/api/boards`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ template, ...(password ? { password } : {}) }) });
 const api = (path, headers = {}) => fetch(`${base}${path}`, { headers });
 /** Which screen stands in front of the board (locked, link, missing, deleted), or null if none comes. */
@@ -137,6 +155,7 @@ async function rawSession(id, hello) {
 
 try {
   if (!base) await startServer();
+  TOKEN = await signIn(PW);
   const res = await makeBoard("pell-and-rye");
   check(res.status === 201, "POST /api/boards makes a board");
   const { id, edit, owner } = await res.json();
@@ -323,11 +342,6 @@ try {
   await settle(D.waitForSelector(".demo-note", { state: "visible", timeout: 3000 }), "once you change the demo, it says only you can see it");
   const demoCount = await D.$$eval(".item", (e) => e.length);
   await D.click(".demo-note [data-demo='real']");
-  if (TEAM) {
-    await D.waitForSelector(".team-form");
-    await D.fill(".team-form input", TEAM);
-    await D.click(".team-form button[type=submit]");
-  }
   await D.waitForSelector(".share-dialog.open input[readonly]", { timeout: 8000 });
   const realLink = await D.$eval(".share-dialog.open input[readonly]", (e) => e.value);
   check(/\/b\/[a-z0-9]{10}#k=[a-z0-9]{26}$/.test(realLink), "“Make it a real board” opens a real board with its Share dialog and edit link");
@@ -355,7 +369,7 @@ try {
     () => check(true, "the front page opens on the demo, already playing"),
     () => check(false, "the front page opens on the demo, already playing"),
   );
-  const calm = await browser.newContext({ viewport: { width: 1280, height: 800 }, reducedMotion: "reduce" });
+  const calm = await inContext(browser, { viewport: { width: 1280, height: 800 }, reducedMotion: "reduce" });
   const R = await calm.newPage();
   R.on("pageerror", (e) => errors.push(`reduced motion: ${e.message}`));
   await R.goto(`${base}/`);
@@ -521,16 +535,34 @@ try {
   await ro.next(["done"]);
   ro.close();
 
-  // A team password keeps strangers from starting boards.
-  if (TEAM) {
-    check((await makeBoard("blank", null)).status === 401, "with a team password set, nobody else can start a board");
+  // The site's password keeps strangers off the front page and from starting boards; board links still open.
+  if (TOKEN) {
+    check((await makeBoard("blank", null)).status === 401, "without the site's password, nobody can start a board");
     check((await makeBoard("blank", "not-the-password")).status === 401, "nor with a wrong one");
+    const told = await (await api("/api/site")).json();
+    check(told.gate === true && told.in === false && !("initial" in told), "a stranger is told only that there is a password");
+    const health = await (await api("/api/health")).json();
+    check(health.password === true, "and /api/health says it has one");
+    const S = await person(browser, "Stranger", "#C9B6FF", undefined, false);
+    await S.goto(`${base}/`);
+    await settle(S.waitForSelector(".site-gate .site-form input", { timeout: 6000 }), "the front page asks a stranger for the password first");
+    check(!(await S.$(".board-app")), "with no demo behind it");
+    await S.goto(`${base}/new?template=blank`);
+    await settle(S.waitForSelector(".site-gate .site-form input", { timeout: 6000 }), "and so does starting a board");
+    await S.fill(".site-form input", "not-it-either");
+    await S.click(".site-form button[type=submit]");
+    await settle(S.waitForFunction(() => /not it/.test(document.querySelector(".site-form .form-error")?.textContent ?? ""), null, { timeout: 6000 }), "a wrong password says so");
+    const made = await (await makeBoard("blank")).json();
+    await S.goto(`${base}/b/${made.id}#k=${made.edit}`);
+    await settle(S.waitForSelector(".board-app .empty-hint.show", { timeout: 6000 }), "a board link opens without the site's password");
+    await S.click(".topbar .home");
+    await S.waitForSelector(".boards-menu.open");
+    check(!(await S.$(".boards-menu [data-menu='site']")), "and someone in on a link alone gets no Site password item");
+    await S.context().close();
     const T = await person(browser, "Dee", "#FFE38A");
     await T.goto(`${base}/new?template=blank`);
-    await T.waitForSelector(".team-form");
-    await T.fill(".team-form input", TEAM);
-    await T.click(".team-form button[type=submit]");
-    await settle(T.waitForSelector(".board-app .empty-hint.show", { timeout: 6000 }), "the team password page lets the team start a board");
+    await settle(T.waitForSelector(".board-app .empty-hint.show", { timeout: 6000 }), "a browser that gave the password starts boards straight away");
+    await T.context().close();
   }
 
   // A chat becomes a plan; the week goes into calendars.
@@ -630,7 +662,7 @@ try {
     const today = iso(new Date());
     const monday = plus(today, -((new Date(`${today}T00:00:00Z`).getUTCDay() + 6) % 7));
     const nextWeek = plus(today, 7);
-    const res = await fetch(`${base}/api/boards`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ template: "blank", today, ...(TEAM ? { password: TEAM } : {}) }) });
+    const res = await fetch(`${base}/api/boards`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ template: "blank", today, password: PW }) });
     const made = await res.json();
     const rs = await rawSession(made.id, { key: made.edit });
     const init = await rs.next(["init"]);
@@ -871,7 +903,7 @@ try {
 
   // An AI assistant plans on the board over MCP.
   {
-    const res = await fetch(`${base}/api/boards`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ template: "blank", ...(TEAM ? { password: TEAM } : {}) }) });
+    const res = await fetch(`${base}/api/boards`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ template: "blank", password: PW }) });
     const made = await res.json();
     const rs = await rawSession(made.id, { key: made.edit });
     const init = await rs.next(["init"]);
@@ -935,6 +967,59 @@ try {
     for (const x of [rs, rv, ro]) x.close();
   }
 
+  // The initial password asks for one of your own, on the spot or later from Your boards (only here: it would change a real deployment's).
+  if (!process.env.BASE_URL) {
+    const later = await person(browser, "Ana", "#FFB38A", undefined, false);
+    await later.goto(`${base}/`);
+    await later.waitForSelector(".site-gate .site-form input", { timeout: 6000 });
+    await later.fill(".site-form input", INITIAL);
+    await later.click(".site-form button[type=submit]");
+    await settle(later.waitForSelector(".site-pick", { timeout: 6000 }), "coming in with the initial password asks for one of your own");
+    await later.click(".site-pick [data-later]");
+    await settle(later.waitForSelector(".board-app.demo-playing", { timeout: 6000 }), "Later goes on to the demo");
+    const inside = await later.evaluate(() => fetch("/api/site").then((r) => r.json()));
+    check(inside.in === true && inside.initial === true && inside.fixed === false, "the site tells someone in that it's still the initial password");
+    await later.context().close();
+
+    const S = await person(browser, "Bo", "#C9B6FF", undefined, false);
+    await S.goto(`${base}/new?template=blank`);
+    await S.waitForSelector(".site-gate .site-form input", { timeout: 6000 });
+    await S.fill(".site-form input", INITIAL);
+    await S.click(".site-form button[type=submit]");
+    await S.waitForSelector(".site-pick", { timeout: 6000 });
+    await S.fill(".site-pick input[name=next]", INITIAL);
+    await S.fill(".site-pick input[name=again]", INITIAL);
+    await S.click(".site-pick button[type=submit]");
+    await settle(S.waitForFunction(() => /starts with/.test(document.querySelector(".site-pick .form-error")?.textContent ?? ""), null, { timeout: 6000 }), "it won't take the initial one again");
+    const picked = "e2e-team-secret";
+    await S.fill(".site-pick input[name=next]", picked);
+    await S.fill(".site-pick input[name=again]", picked);
+    await S.click(".site-pick button[type=submit]");
+    await settle(S.waitForSelector(".board-app .empty-hint.show", { timeout: 8000 }), "a password of your own, then straight on to the new board");
+    check((await makeBoard("blank", INITIAL)).status === 401, `after that, ${INITIAL} no longer works`);
+    check((await makeBoard("blank", null)).status === 401 && (await fetch(`${base}/api/boards`, { method: "POST", headers: { "content-type": "application/json", cookie: `longtable_site=${TOKEN}` }, body: "{}" })).status === 401, "and browsers that gave the old one have to give the new one");
+    PW = picked;
+    TOKEN = await signIn(PW);
+    check((await makeBoard("blank")).status === 201, "the new one works");
+    // Later, from Your boards: Site password…, which needs the current one.
+    await S.click(".topbar .home");
+    await S.waitForSelector(".boards-menu.open [data-menu='site']");
+    await S.click(".boards-menu [data-menu='site']");
+    await S.waitForSelector(".site-dialog.open input[name=current]");
+    check(!/still/.test(await S.$eval(".site-dialog.open p", (p) => p.textContent)), "Site password… no longer says it's the initial one");
+    await S.fill(".site-dialog input[name=current]", "wrong-current");
+    await S.fill(".site-dialog input[name=next]", "e2e-team-secret-2");
+    await S.fill(".site-dialog input[name=again]", "e2e-team-secret-2");
+    await S.click(".site-dialog button[type=submit]");
+    await settle(S.waitForFunction(() => /not the current/.test(document.querySelector(".site-dialog .form-error")?.textContent ?? ""), null, { timeout: 6000 }), "Site password… wants the current one");
+    await S.fill(".site-dialog input[name=current]", picked);
+    await S.click(".site-dialog button[type=submit]");
+    await settle(S.waitForFunction(() => /Site password changed/.test(document.body.innerText), null, { timeout: 6000 }), "and with it, changes the password");
+    PW = "e2e-team-secret-2";
+    TOKEN = await signIn(PW);
+    await S.context().close();
+  }
+
   // One address can't start boards without end (only here: it would use up the quota of a real deployment).
   if (!process.env.BASE_URL) {
     let res = null;
@@ -946,9 +1031,6 @@ try {
     check(res.status === 429 && body.error === "too-many-boards" && Number(res.headers.get("retry-after")) > 0, "starting dozens of boards in an hour is slowed down");
     const T = await person(browser, "Eve", "#FFE38A");
     await T.goto(`${base}/new?template=blank`);
-    await T.waitForSelector(".team-form");
-    await T.fill(".team-form input", TEAM);
-    await T.click(".team-form button[type=submit]");
     await settle(T.waitForFunction(() => /didn’t start/.test(document.body.innerText) && /new boards in one hour/.test(document.body.innerText), null, { timeout: 6000 }), "and the page says why, instead of going blank");
   }
 

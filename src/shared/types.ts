@@ -162,6 +162,18 @@ export interface Access {
   local?: boolean;
 }
 
+/** What /api/site says: whether this Longtable asks for its password, and whether this browser is in. */
+export interface SiteStatus {
+  /** It asks for a password (it doesn't when SITE_PASSWORD is "off"). */
+  gate: boolean;
+  /** This browser gave the password (or there is none to give). */
+  in: boolean;
+  /** Told only to browsers that are in: it is still the initial password. */
+  initial?: boolean;
+  /** Told only to browsers that are in: the password is fixed in Cloudflare (SITE_PASSWORD), so it can't be changed on the site. */
+  fixed?: boolean;
+}
+
 /** Why a board would not open: no board at that address, a link that is no longer the board's, or the board was deleted. */
 export type DeniedReason = "missing" | "link" | "deleted";
 
