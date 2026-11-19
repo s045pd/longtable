@@ -1452,6 +1452,41 @@ a.btn {
 .demo-btn svg {
   flex: none;
 }
+.demo-btn {
+  white-space: nowrap;
+}
+.demo-btn .narrow {
+  display: none;
+}
+.boards-menu {
+  min-width: 240px;
+  max-width: min(360px, calc(100vw - 16px));
+  z-index: 40;
+}
+.boards-menu a {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 36px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: var(--chalk);
+  text-decoration: none;
+  font-size: 14px;
+}
+.boards-menu a:hover {
+  background: var(--hover);
+}
+.boards-menu a span {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.boards-menu time {
+  font: 12px var(--mono);
+  color: var(--muted);
+}
 .demo-btn.on {
   border-color: #4a4d59;
 }
@@ -1777,6 +1812,13 @@ a.btn {
   }
   .demo-btn .wide {
     display: none;
+  }
+  .demo-btn .narrow {
+    display: inline;
+  }
+  .demo-btn {
+    padding: 0 9px;
+    gap: 6px;
   }
   .empty-hint .big {
     font-size: 26px;

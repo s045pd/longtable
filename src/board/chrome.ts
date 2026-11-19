@@ -7,6 +7,7 @@ import { fileStem, toCsv, toIcs, toMarkdown } from "../shared/exporter";
 import { REACTIONS } from "../shared/schema";
 import type { NoteItem, ReactionKind } from "../shared/types";
 import { escapeHtml, type Board, type Tool } from "./app";
+import { recentBoards } from "./identity";
 import type { LinkStatus } from "./net";
 import { reactionIcon } from "./people";
 
@@ -66,6 +67,7 @@ export class Chrome {
   private reactMenu: HTMLElement;
   private zoomMenu: HTMLElement;
   private whenMenu: HTMLElement;
+  private boardsMenu: HTMLElement;
   private sortedTimers: number[] = [];
   private avatarsShown = new Set<string>();
 
@@ -105,6 +107,7 @@ export class Chrome {
       <div class="menu react-menu" role="menu">${REACTIONS.map((k) => `<button data-react="${k}" aria-label="${k}">${reactionIcon(k, "#ECE9E2")}</button>`).join("")}</div>
       <div class="selbar" role="toolbar" aria-label="Selection"></div>
       <div class="menu when-menu" role="dialog" aria-label="Pick the day"></div>
+      <div class="menu boards-menu" role="menu" aria-label="Your boards"></div>
       <button class="tidy-pill" aria-label="Tidy up"><span class="grid-icon"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="pill-text"><b>Tidy up</b><small></small></span></button>
       <div class="status" aria-live="polite"></div>
       <div class="toasts" aria-live="polite"></div>
@@ -132,6 +135,7 @@ export class Chrome {
     this.reactMenu = $(".react-menu");
     this.zoomMenu = $(".zoom-menu");
     this.whenMenu = $(".when-menu");
+    this.boardsMenu = $(".boards-menu");
 
     // Names in the top bar are edited in place.
     for (const key of ["client", "file"] as const) {
@@ -182,7 +186,7 @@ export class Chrome {
       this.closeMenus();
     });
     document.addEventListener("pointerdown", (e) => {
-      if (!(e.target as HTMLElement).closest(".menu, .react, .zoom, .day-tag, [data-act='day']")) this.closeMenus();
+      if (!(e.target as HTMLElement).closest(".menu, .react, .zoom, .day-tag, [data-act='day'], [data-demo='boards']")) this.closeMenus();
     });
     this.whenMenu.addEventListener("pointerdown", (e) => e.stopPropagation());
     this.whenMenu.addEventListener("click", (e) => {
@@ -234,6 +238,8 @@ export class Chrome {
       else if (act === "stop") board.demo?.stop();
       else if (act === "replay") board.demo?.start();
       else if (act === "own") location.href = "/new?template=pell-and-rye";
+      else if (act === "blank") location.href = "/new?template=blank";
+      else if (act === "boards") this.openBoards((e.target as HTMLElement).closest("button")!);
       else if (act === "back") location.href = demoBack() ?? "/";
     });
     let shieldNoticed = false;
@@ -280,10 +286,13 @@ export class Chrome {
     menu.style.top = `${top}px`;
   }
 
-  private closeMenus() {
+  /** Close every open menu; says whether one was open. */
+  closeMenus(): boolean {
+    const open = [this.reactMenu, this.zoomMenu, this.boardsMenu].some((m) => m.classList.contains("open"));
     this.reactMenu.classList.remove("open");
     this.zoomMenu.classList.remove("open");
-    this.closeWhen();
+    this.boardsMenu.classList.remove("open");
+    return this.closeWhen() || open;
   }
 
   /** Close the day picker if it is open; says whether it was. */
@@ -363,7 +372,7 @@ export class Chrome {
     const file = this.top.querySelector<HTMLElement>(".file")!;
     if (document.activeElement !== client) client.textContent = m.client;
     if (document.activeElement !== file) file.textContent = m.file;
-    document.title = `${[m.client, m.file].filter(Boolean).join(" / ") || "Board"} · Longtable`;
+    document.title = m.template === "demo" ? "Longtable · plan it together" : `${[m.client, m.file].filter(Boolean).join(" / ") || "Board"} · Longtable`;
     const tag = this.board.root.querySelector<HTMLElement>(".corner-tag")!;
     tag.textContent =
       m.template === "pell-and-rye"
@@ -504,23 +513,49 @@ export class Chrome {
     btn.title = on ? "They only appear on your screen and never change the board." : "Four made-up people wander this board on your screen only, so you can see what planning together looks like.";
   }
 
-  /** The demo's buttons in the corner: play it from any board; stop, replay or leave it on the demo board. */
+  /**
+   * The demo's buttons in the corner. On a board: play the demo. On the demo
+   * (the front page): stop it while it plays; then replay it, make a board of
+   * your own (the example or a blank one), or go to one of yours.
+   */
   onDemo() {
     const slot = this.board.root.querySelector<HTMLElement>(".demo-controls")!;
     const demo = this.board.demo;
     const play = '<svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path d="M2.5 1.5v9l8-4.5z" fill="currentColor"/></svg>';
     const stop = '<svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><rect x="2" y="2" width="8" height="8" rx="1.5" fill="currentColor"/></svg>';
+    const caret = '<svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M3 4.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>';
     this.board.root.classList.toggle("demo-playing", !!demo?.playing);
     if (!demo) {
       slot.innerHTML = `<button class="sample-btn demo-btn" data-demo="play" title="Watch five made-up people plan a week on a board of its own, then tidy it">${play}Play the demo</button>`;
       return;
     }
     const back = demoBack();
+    const mine = !back && recentBoards().length > 0 ? `<button class="sample-btn demo-btn" data-demo="boards" aria-haspopup="menu"><span class="wide">Your boards</span><span class="narrow">Boards</span>${caret}</button>` : "";
     slot.innerHTML = demo.playing
-      ? `<button class="sample-btn demo-btn on" data-demo="stop" title="Stop and try the board yourself · Esc">${stop}Stop demo</button>`
-      : `<button class="sample-btn demo-btn" data-demo="replay">${play}Replay<span class="wide"> demo</span></button>` +
-        `<button class="sample-btn demo-btn primary" data-demo="own">Make your own<span class="wide"> board</span></button>` +
+      ? `<button class="sample-btn demo-btn on" data-demo="stop" title="Stop and try the board yourself · Esc">${stop}Stop demo</button>` + mine
+      : `<button class="sample-btn demo-btn" data-demo="replay">${play}${demo.played ? `Replay<span class="wide"> demo</span>` : `Play<span class="wide"> the demo</span>`}</button>` +
+        `<button class="sample-btn demo-btn primary" data-demo="own"><span class="wide">Make your own board</span><span class="narrow">Your own</span></button>` +
+        `<button class="sample-btn demo-btn" data-demo="blank">Blank<span class="wide"> board</span></button>` +
+        mine +
         (back ? `<button class="sample-btn demo-btn" data-demo="back">Back<span class="wide"> to your board</span></button>` : "");
+  }
+
+  /** The boards you have opened on this device, as a menu above the button. */
+  private openBoards(by: HTMLElement) {
+    const open = this.boardsMenu.classList.contains("open");
+    this.closeMenus();
+    if (open) return;
+    const when = (at: number) => new Date(at).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+    this.boardsMenu.innerHTML = recentBoards()
+      .map((r) => `<a href="/b/${escapeHtml(r.id)}" role="menuitem"><span>${escapeHtml(r.title || "Untitled board")}</span><time>${when(r.at)}</time></a>`)
+      .join("");
+    this.boardsMenu.classList.add("open");
+    const r = by.getBoundingClientRect();
+    const m = this.boardsMenu.getBoundingClientRect();
+    let top = r.top - m.height - 8;
+    if (top < 8) top = r.bottom + 8;
+    this.boardsMenu.style.left = `${Math.round(Math.max(8, Math.min(innerWidth - m.width - 8, r.left)))}px`;
+    this.boardsMenu.style.top = `${Math.round(top)}px`;
   }
 
   setStatus(s: LinkStatus) {

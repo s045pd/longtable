@@ -11,6 +11,7 @@
 import { CHECK, bounds, checkHeight, union, type Box } from "../shared/geometry";
 import { DEMO_PEOPLE, makeTemplate } from "../shared/templates";
 import type { CheckItem, Item, NoteItem, Op, ReactionKind, StrokeItem } from "../shared/types";
+import { planTidy } from "../shared/tidy";
 import type { Board } from "./app";
 
 type Who = keyof typeof DEMO_PEOPLE;
@@ -58,6 +59,8 @@ const easeOut = (p: number) => 1 - (1 - p) ** 3;
 
 export class Demo {
   playing = false;
+  /** Whether it has started at least once (the button then says Replay). */
+  played = false;
   private run = 0;
   private actors = new Map<Who, Actor>();
   private seed = new Map<string, Item>();
@@ -65,10 +68,35 @@ export class Demo {
 
   constructor(private board: Board) {}
 
+  /** On arrival: play, unless the system asks for reduced motion; then show how it ends. */
+  autoplay() {
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) this.showEnd();
+    else this.start();
+  }
+
+  /** The ending at once, without the story: the example board, tidied into its week. */
+  showEnd() {
+    this.run++;
+    this.reset();
+    const b = this.board;
+    const items = [...this.seed.values()];
+    const sat = this.seed.get("n-double") as NoteItem;
+    items.push({ ...sat, id: "n-double-sun", by: "Ana", text: sat.text.replace(/Sat$/, "Sun"), x: sat.x + 100, y: sat.y - 230, rot: 0 });
+    b.commit(items.map((item) => ({ op: "put", item }) as Op), { history: false });
+    const plan = planTidy(b.state.list(), null, () => b.newItemId());
+    if (plan) {
+      b.commit(plan.ops, { history: false });
+      b.cam.set(b.cam.fitView(plan.box, b.insets(), 1));
+    }
+    this.playing = false;
+    this.board.chrome.onDemo();
+  }
+
   start() {
     const run = ++this.run;
     this.reset();
     this.playing = true;
+    this.played = true;
     this.board.chrome.onDemo();
     this.story(run).then(
       () => run === this.run && this.finish(false),

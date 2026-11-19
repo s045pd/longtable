@@ -162,7 +162,7 @@ export class Board {
     if (this.demo) {
       if (this.firstInit) {
         this.firstInit = false;
-        this.demo.start();
+        this.demo.autoplay();
       }
       return;
     }

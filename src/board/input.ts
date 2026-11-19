@@ -389,7 +389,7 @@ export function attachInput(board: Board) {
   addEventListener("keydown", (e) => {
     // While the demo plays, the board is its; Esc stops it.
     if (board.demo?.playing) {
-      if (e.key === "Escape") board.demo.stop();
+      if (e.key === "Escape" && !board.chrome.closeMenus()) board.demo.stop();
       return;
     }
     if (typing() || board.root.querySelector(".dialog.open")) return;
@@ -435,7 +435,7 @@ export function attachInput(board: Board) {
         board.deleteSelected();
         return;
       case "Escape":
-        if (board.chrome.closeWhen()) return;
+        if (board.chrome.closeMenus()) return;
         if (board.following) board.follow(null);
         else if (board.tool !== "select") board.setTool("select");
         else board.setSelection([]);

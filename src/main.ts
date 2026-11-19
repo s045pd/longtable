@@ -1,5 +1,6 @@
-// Routes: "/" is the front page, "/b/<id>" is a board, "/new?template=…"
-// starts one, "/demo" plays the whole story on a board of its own. In production boards are live (the Worker); `npm run dev`
+// Routes: "/" (and "/demo") is the front page, which plays the whole story
+// on a board of its own; "/b/<id>" is a board; "/new?template=…" starts one;
+// "/about" is the written introduction. In production boards are live (the Worker); `npm run dev`
 // without a Worker keeps them on this device (add ?live to force live).
 import "@fontsource-variable/inter/wght.css";
 import "@fontsource-variable/bricolage-grotesque/wght.css";
@@ -42,7 +43,8 @@ function route() {
     new Board(app, m[1], { live: LIVE, template });
     return;
   }
-  if (location.pathname === "/demo" || location.pathname === "/demo/") {
+  // The front page is the demo: it plays as soon as you arrive.
+  if (location.pathname === "/" || location.pathname === "/demo" || location.pathname === "/demo/") {
     new Board(app, "demo", { live: false, demo: true });
     return;
   }
@@ -51,7 +53,13 @@ function route() {
     startBoard((TEMPLATES as readonly string[]).includes(t ?? "") ? (t as TemplateName) : "blank").catch(() => (location.href = "/"));
     return;
   }
-  renderLanding(app, startBoard);
+  // The old front page, with the pitch and the feature cards.
+  if (location.pathname === "/about") {
+    renderLanding(app, startBoard);
+    return;
+  }
+  app.className = "landing";
+  app.innerHTML = `<main class="lost"><h1>There’s nothing here.</h1><p>Longtable lives at the front page and on board links.</p><a class="btn primary" href="/">Go to Longtable</a></main>`;
 }
 
 addEventListener("popstate", () => location.reload());

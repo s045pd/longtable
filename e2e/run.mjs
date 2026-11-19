@@ -209,7 +209,7 @@ try {
     buttons: [...document.querySelectorAll(".demo-controls button")].map((b) => b.dataset.demo),
   }));
   check(demoEnd.notes === 24 && demoEnd.week, `it ends on the tidied week (${demoEnd.notes} notes, week ${demoEnd.week})`);
-  check(demoEnd.buttons.join(",") === "replay,own,back", "then offers Replay, Make your own board and Back to your board");
+  check(demoEnd.buttons.join(",") === "replay,own,blank,back", `then offers Replay, Make your own board, Blank board and Back to your board (${demoEnd.buttons})`);
   const after = await (await fetch(`${base}/api/boards/${id}/snapshot`)).json();
   check(!after.items.some((it) => it.id === "n-double-sun"), "the demo never touches a real board");
   await D.click(".demo-controls [data-demo='replay']");
@@ -217,6 +217,25 @@ try {
   await wait(2500);
   await D.keyboard.press("Escape");
   check(!(await D.evaluate(() => document.querySelector(".board-app").classList.contains("demo-playing"))), "Esc stops the demo and hands the board over");
+
+  // The front page is the demo, playing as soon as it opens; with reduced motion it shows the ending instead.
+  const F = await person(browser, "Visitor", "#C9B6FF");
+  await F.goto(`${base}/`);
+  await F.waitForSelector(".board-app.demo-playing", { timeout: 5000 }).then(
+    () => check(true, "the front page opens on the demo, already playing"),
+    () => check(false, "the front page opens on the demo, already playing"),
+  );
+  const calm = await browser.newContext({ viewport: { width: 1280, height: 800 }, reducedMotion: "reduce" });
+  const R = await calm.newPage();
+  R.on("pageerror", (e) => errors.push(`reduced motion: ${e.message}`));
+  await R.goto(`${base}/`);
+  await R.waitForSelector(".item.week", { state: "attached", timeout: 5000 }).catch(() => {});
+  const still = await R.evaluate(() => ({
+    playing: document.querySelector(".board-app").classList.contains("demo-playing"),
+    notes: document.querySelectorAll(".item.note").length,
+    play: document.querySelector(".demo-controls [data-demo='replay']")?.textContent,
+  }));
+  check(!still.playing && still.notes === 24 && /Play/.test(still.play ?? ""), "with reduced motion it shows the tidied week and waits for Play");
 
   await browser.close();
 } catch (e) {

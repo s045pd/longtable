@@ -33,13 +33,16 @@ five fictional people.
   and a time. Or drag a note into a column of the week: it takes that day and
   slots in. A picked day wins over the words and shows as a stamp on the note;
   "Read from the words again" undoes the pick.
-- **Play the demo.** The corner of every board (and the front page) has a
-  button that opens `/demo`: a board of its own, in your tab only, where five
+- **The front page is the demo.** Opening Longtable (`/`, also `/demo`)
+  plays the whole story on a board of its own, in your tab only, where five
   made-up people play out the whole story by themselves. They join one by one,
   write, draw, drop photos, tick and vote at once while the camera follows the
   busiest corner, two of them pull at the same note, and Ana selects
   everything and presses Tidy up. Esc stops it and hands the board to you;
-  nothing there is saved.
+  nothing there is saved. Afterwards: replay it, make your own board (the
+  example or a blank one) or open one of yours. Every board has a "Play the
+  demo" button in its corner; with reduced motion the front page shows the
+  tidied week and waits for Play. The written introduction is at `/about`.
 - **Follow someone.** Click a face in the top bar and your view follows theirs.
 - **Export the week.** Copy it as Markdown for a chat, or download a CSV or an
   `.ics` calendar with timed and all-day events.
@@ -101,8 +104,9 @@ src/board/    the board in the browser: app.ts (state, actions, undo),
               views.ts (DOM per item), input.ts (pointer, touch, keys),
               editor.ts (typing), people.ts (cursors, reactions), chrome.ts
               (bars, dialogs), net.ts (WebSocket link with reconnect, or a
-              local link for development), camera.ts and grid.ts
-src/landing.ts  the front page
+              local link for development), camera.ts and grid.ts, and
+              demo.ts (the front page's demo, played with all of the above)
+src/landing.ts  the written introduction (/about)
 worker/       index.ts (API and static files) and room.ts (one board's room)
 ```
 
