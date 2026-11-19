@@ -16,7 +16,9 @@ import { measureLabel, resetFits } from "./fit";
 import { Grid } from "./grid";
 import { loadIdentity, rememberBoard, saveIdentity, deviceId, type Identity } from "./identity";
 import { attachInput } from "./input";
-import { LiveLink, LocalLink, type InitData, type Link, type LinkStatus } from "./net";
+import { DemoLink, LiveLink, LocalLink, type InitData, type Link, type LinkStatus } from "./net";
+import { Demo } from "./demo";
+import { nextMonday } from "../shared/days";
 import { People } from "./people";
 import { ItemView, setWeekOf, type Motion } from "./views";
 import { Editor } from "./editor";
@@ -46,6 +48,8 @@ export class Board {
   chrome!: Chrome;
   editor!: Editor;
   sampleTeam!: SampleTeam;
+  /** Set on the demo board (/demo), which plays the whole story by itself. */
+  demo: Demo | null = null;
   link: Link;
   sel = new Set<string>();
   tool: Tool = "select";
@@ -62,11 +66,14 @@ export class Board {
   private lastView = "";
   private firstInit = true;
 
-  constructor(root: HTMLElement, id: string, opts: { live: boolean; template?: TemplateName }) {
+  constructor(root: HTMLElement, id: string, opts: { live: boolean; template?: TemplateName; demo?: boolean }) {
     this.id = id;
     this.root = root;
+    if (opts.demo) this.demo = new Demo(this);
     const saved = loadIdentity();
     this.me = { cid: saved?.cid ?? deviceId(), name: saved?.name ?? "", color: saved?.color ?? PALETTE[Math.floor(Math.random() * 5)], pid: "" };
+    // The demo's five are Ana, Bo, Cy, Dee and Eli; you watch as yourself, in grey if you have no colour yet.
+    if (opts.demo && !saved?.name) this.me = { ...this.me, name: "You", color: "#8E919C" };
     this.build();
     setLabelMeasure(measureLabel);
     const events = {
@@ -84,7 +91,11 @@ export class Board {
         this.chrome.setStatus(s);
       },
     };
-    this.link = opts.live ? new LiveLink(id, events) : new LocalLink(id, events, opts.template ?? "blank");
+    this.link = opts.demo
+      ? new DemoLink(events, { client: "Pell & Rye", file: "Opening week", weekOf: nextMonday(), template: "demo" })
+      : opts.live
+        ? new LiveLink(id, events)
+        : new LocalLink(id, events, opts.template ?? "blank");
     // Say hello with whatever name we have; the join card renames us after.
     this.link.hello(this.me.name || "Guest", this.me.color, this.me.cid);
     document.fonts?.ready.then(() => {
@@ -148,6 +159,13 @@ export class Board {
     this.chrome.onMeta();
     this.chrome.onPeople();
     this.chrome.onItems();
+    if (this.demo) {
+      if (this.firstInit) {
+        this.firstInit = false;
+        this.demo.start();
+      }
+      return;
+    }
     rememberBoard(this.id, [d.meta.client, d.meta.file].filter(Boolean).join(" · "));
     if (this.firstInit) {
       this.firstInit = false;
@@ -264,6 +282,13 @@ export class Board {
     if (!step) return;
     this.commit(step.redo, { history: false, motion: () => ({ kind: "spring", delay: 0 }) });
     this.undoStack.push(step);
+    this.chrome.onHistory();
+  }
+
+  /** Forget every undo step (the demo starts over on a clean slate). */
+  clearHistory() {
+    this.undoStack = [];
+    this.redoStack = [];
     this.chrome.onHistory();
   }
 

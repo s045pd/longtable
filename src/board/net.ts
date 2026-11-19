@@ -298,3 +298,24 @@ export class LocalLink implements Link {
     this.channel?.close();
   }
 }
+
+/**
+ * The demo's link: the board lives in this tab only. Nothing is saved,
+ * nothing is sent, and nobody else can see it.
+ */
+export class DemoLink implements Link {
+  constructor(
+    private events: LinkEvents,
+    private meta: Meta,
+  ) {}
+
+  hello() {
+    this.events.init({ you: "demo-you", meta: this.meta, items: [], people: [] }, []);
+    this.events.status("online");
+  }
+
+  ops() {}
+  presence() {}
+  react() {}
+  close() {}
+}

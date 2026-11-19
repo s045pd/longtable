@@ -33,6 +33,13 @@ five fictional people.
   and a time. Or drag a note into a column of the week: it takes that day and
   slots in. A picked day wins over the words and shows as a stamp on the note;
   "Read from the words again" undoes the pick.
+- **Play the demo.** The corner of every board (and the front page) has a
+  button that opens `/demo`: a board of its own, in your tab only, where five
+  made-up people play out the whole story by themselves. They join one by one,
+  write, draw, drop photos, tick and vote at once while the camera follows the
+  busiest corner, two of them pull at the same note, and Ana selects
+  everything and presses Tidy up. Esc stops it and hands the board to you;
+  nothing there is saved.
 - **Follow someone.** Click a face in the top bar and your view follows theirs.
 - **Export the week.** Copy it as Markdown for a chat, or download a CSV or an
   `.ics` calendar with timed and all-day events.

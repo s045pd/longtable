@@ -63,6 +63,7 @@ export function renderLanding(app: HTMLElement, start: (t: TemplateName) => Prom
           <div class="cta">
             <button class="btn primary big" data-start="pell-and-rye">Open the Pell &amp; Rye example</button>
             <button class="btn big" data-start="blank">Start a blank board</button>
+            <a class="btn big ghost" href="/demo"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2.5 1.5v9l8-4.5z" fill="currentColor"/></svg>Watch the demo</a>
           </div>
           <p class="small muted">No sign-up. A board is a link: whoever has it can plan with you. Each example opens as your own copy.</p>
         </div>

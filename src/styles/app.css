@@ -22,6 +22,9 @@
 * {
   box-sizing: border-box;
 }
+[hidden] {
+  display: none !important;
+}
 html,
 body {
   margin: 0;
@@ -71,6 +74,10 @@ svg {
   font-size: 14px;
   white-space: nowrap;
   transition: background 0.15s, transform 0.1s;
+}
+a.btn {
+  color: var(--chalk);
+  text-decoration: none;
 }
 .btn:hover {
   background: #33353f;
@@ -842,6 +849,9 @@ svg {
   text-align: center;
   border: 2.5px solid var(--bar);
   box-sizing: content-box;
+}
+/* Only someone who just arrived pops in; the rest stay put when the row redraws. */
+.avatar.new {
   animation: pop 0.42s cubic-bezier(0.3, 1.6, 0.5, 1);
 }
 .avatar.me {
@@ -1436,6 +1446,78 @@ svg {
     box-shadow: 0 0 0 7px rgba(157, 240, 196, 0);
   }
 }
+.demo-controls {
+  display: contents;
+}
+.demo-btn svg {
+  flex: none;
+}
+.demo-btn.on {
+  border-color: #4a4d59;
+}
+.demo-btn.primary {
+  background: var(--chalk);
+  border-color: var(--chalk);
+  color: var(--ink);
+  font-weight: 600;
+}
+.demo-btn.primary:hover {
+  background: #fff;
+}
+/* While the demo plays, the board is the demo's: a clear pane takes your
+   pointer, and only the corner's buttons stay in reach. */
+.demo-shield {
+  position: absolute;
+  inset: 0;
+  z-index: 25;
+  display: none;
+}
+.demo-playing .demo-shield {
+  display: block;
+}
+.demo-playing .corner {
+  z-index: 30;
+}
+.click-ring {
+  position: absolute;
+  width: 34px;
+  height: 34px;
+  margin: -17px 0 0 -17px;
+  border-radius: 50%;
+  border: 2.5px solid var(--c);
+  animation: click-ring 0.5s cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+  pointer-events: none;
+}
+@keyframes click-ring {
+  from {
+    transform: scale(0.3);
+    opacity: 1;
+  }
+  to {
+    transform: scale(1.4);
+    opacity: 0;
+  }
+}
+.demo-marquee {
+  position: absolute;
+  border: calc(2px / var(--z, 1)) solid var(--c);
+  background: color-mix(in srgb, var(--c) 10%, transparent);
+  border-radius: calc(4px / var(--z, 1));
+  pointer-events: none;
+}
+.tidy-pill.pressed {
+  scale: 0.93;
+  background: #fff;
+}
+/* The tug of war: a note pulled two ways stretches like taffy. */
+.item.tugged .shape {
+  transition: transform 0.12s;
+  transform: scaleX(var(--tug, 1)) skewX(var(--tug-skew, 0deg));
+}
+.item.snap .shape {
+  transition: transform 0.5s cubic-bezier(0.3, 1.8, 0.5, 1);
+  transform: none;
+}
 .corner-tag {
   padding: 6px 10px;
   border-radius: 8px;
@@ -1688,6 +1770,13 @@ svg {
   .corner-tag {
     font-size: 9.5px;
     white-space: nowrap;
+  }
+  .demo-controls {
+    display: flex;
+    gap: 6px;
+  }
+  .demo-btn .wide {
+    display: none;
   }
   .empty-hint .big {
     font-size: 26px;

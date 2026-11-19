@@ -66,6 +66,8 @@ export class Chrome {
   private reactMenu: HTMLElement;
   private zoomMenu: HTMLElement;
   private whenMenu: HTMLElement;
+  private sortedTimers: number[] = [];
+  private avatarsShown = new Set<string>();
 
   constructor(private board: Board) {
     const root = board.root;
@@ -112,7 +114,8 @@ export class Chrome {
       </div>
       <div class="follow-frame"><span></span></div>
       <div class="sorted" aria-live="polite"></div>
-      <div class="corner"><span class="corner-tag"></span><button class="sample-btn" hidden></button></div>
+      <div class="demo-shield" aria-hidden="true"></div>
+      <div class="corner"><span class="corner-tag"></span><button class="sample-btn" hidden></button><span class="demo-controls"></span></div>
     `,
     );
     const $ = <T extends HTMLElement>(s: string) => root.querySelector(s) as T;
@@ -225,6 +228,21 @@ export class Chrome {
     });
     this.followEl.addEventListener("click", () => board.follow(null));
     root.querySelector(".sample-btn")!.addEventListener("click", () => (board.sampleTeam.active ? board.sampleTeam.stop() : board.sampleTeam.start()));
+    root.querySelector(".demo-controls")!.addEventListener("click", (e) => {
+      const act = (e.target as HTMLElement).closest<HTMLButtonElement>("button")?.dataset.demo;
+      if (act === "play") location.href = `/demo?back=${encodeURIComponent(location.pathname)}`;
+      else if (act === "stop") board.demo?.stop();
+      else if (act === "replay") board.demo?.start();
+      else if (act === "own") location.href = "/new?template=pell-and-rye";
+      else if (act === "back") location.href = demoBack() ?? "/";
+    });
+    let shieldNoticed = false;
+    root.querySelector(".demo-shield")!.addEventListener("pointerdown", () => {
+      if (shieldNoticed) return;
+      shieldNoticed = true;
+      this.toast("The demo is playing. Press Stop (or Esc) to try the board yourself.");
+    });
+    this.onDemo();
     this.selbar.addEventListener("pointerdown", (e) => e.stopPropagation());
     this.selbar.addEventListener("click", (e) => {
       const b = (e.target as HTMLElement).closest<HTMLButtonElement>("button");
@@ -347,7 +365,12 @@ export class Chrome {
     if (document.activeElement !== file) file.textContent = m.file;
     document.title = `${[m.client, m.file].filter(Boolean).join(" / ") || "Board"} · Longtable`;
     const tag = this.board.root.querySelector<HTMLElement>(".corner-tag")!;
-    tag.textContent = m.template === "pell-and-rye" ? "EXAMPLE BOARD · PELL & RYE IS A FICTIONAL BAKERY" : "";
+    tag.textContent =
+      m.template === "pell-and-rye"
+        ? "EXAMPLE BOARD · PELL & RYE IS A FICTIONAL BAKERY"
+        : m.template === "demo"
+          ? "DEMO · NOTHING HERE IS SAVED · PELL & RYE IS A FICTIONAL BAKERY"
+          : "";
     tag.hidden = !tag.textContent;
     this.onSampleTeam();
   }
@@ -360,8 +383,10 @@ export class Chrome {
     const max = innerWidth < 700 ? 2 : 6;
     const shown = others.slice(0, max);
     const extra = others.length - shown.length;
+    const seen = this.avatarsShown;
+    this.avatarsShown = new Set(["me", ...others.map((p) => p.pid)]);
     const av = (pid: string, name: string, color: string, me = false) =>
-      `<button class="avatar${me ? " me" : ""}${b.following === pid ? " followed" : ""}" data-pid="${me ? "me" : pid}" style="--c:${color}" title="${me ? `You (${escapeHtml(name || "Guest")}) · change name or colour` : `${escapeHtml(name)} · click to follow`}" aria-label="${me ? "You" : `Follow ${escapeHtml(name)}`}">${escapeHtml((name || "?").trim().charAt(0).toUpperCase() || "?")}</button>`;
+      `<button class="avatar${me ? " me" : ""}${seen.has(me ? "me" : pid) ? "" : " new"}${b.following === pid ? " followed" : ""}" data-pid="${me ? "me" : pid}" style="--c:${color}" title="${me ? `You (${escapeHtml(name || "Guest")}) · change name or colour` : `${escapeHtml(name)} · click to follow`}" aria-label="${me ? "You" : `Follow ${escapeHtml(name)}`}">${escapeHtml((name || "?").trim().charAt(0).toUpperCase() || "?")}</button>`;
     this.top.querySelector(".avatars")!.innerHTML =
       shown.map((p) => av(p.pid, p.name, p.color)).join("") + (extra > 0 ? `<span class="avatar more">+${extra}</span>` : "") + av("me", b.me.name, b.me.color, true);
   }
@@ -479,6 +504,25 @@ export class Chrome {
     btn.title = on ? "They only appear on your screen and never change the board." : "Four made-up people wander this board on your screen only, so you can see what planning together looks like.";
   }
 
+  /** The demo's buttons in the corner: play it from any board; stop, replay or leave it on the demo board. */
+  onDemo() {
+    const slot = this.board.root.querySelector<HTMLElement>(".demo-controls")!;
+    const demo = this.board.demo;
+    const play = '<svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path d="M2.5 1.5v9l8-4.5z" fill="currentColor"/></svg>';
+    const stop = '<svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><rect x="2" y="2" width="8" height="8" rx="1.5" fill="currentColor"/></svg>';
+    this.board.root.classList.toggle("demo-playing", !!demo?.playing);
+    if (!demo) {
+      slot.innerHTML = `<button class="sample-btn demo-btn" data-demo="play" title="Watch five made-up people plan a week on a board of its own, then tidy it">${play}Play the demo</button>`;
+      return;
+    }
+    const back = demoBack();
+    slot.innerHTML = demo.playing
+      ? `<button class="sample-btn demo-btn on" data-demo="stop" title="Stop and try the board yourself · Esc">${stop}Stop demo</button>`
+      : `<button class="sample-btn demo-btn" data-demo="replay">${play}Replay<span class="wide"> demo</span></button>` +
+        `<button class="sample-btn demo-btn primary" data-demo="own">Make your own<span class="wide"> board</span></button>` +
+        (back ? `<button class="sample-btn demo-btn" data-demo="back">Back<span class="wide"> to your board</span></button>` : "");
+  }
+
   setStatus(s: LinkStatus) {
     this.statusEl.className = `status ${s}`;
     this.statusEl.textContent = s === "online" ? "" : s === "connecting" ? "Connecting…" : "Offline: your changes will sync when the connection is back";
@@ -500,13 +544,21 @@ export class Chrome {
     this.sortedEl.innerHTML =
       `<div class="line">${words.map((w, i) => `<span style="--i:${i}">${escapeHtml(w)}</span>`).join(" ")}</div>` +
       `<div class="sub">${markSvg(PALETTE.slice(0, 5), 1.1)}<span>${count} note${count === 1 ? "" : "s"} into the week${mine ? "" : " · tidied by someone else"}</span></div>`;
+    this.clearSorted();
+    this.sortedTimers.push(
+      window.setTimeout(() => {
+        void this.sortedEl.offsetWidth;
+        this.sortedEl.classList.add("show");
+      }, Math.max(0, afterMs - 250)),
+      window.setTimeout(() => this.sortedEl.classList.add("out"), afterMs + 2600),
+    );
+  }
+
+  /** Take the closing line away, and any still waiting to show. */
+  clearSorted() {
+    for (const t of this.sortedTimers) clearTimeout(t);
+    this.sortedTimers = [];
     this.sortedEl.classList.remove("show", "out");
-    clearTimeout((this.sortedEl as unknown as { t?: number }).t);
-    window.setTimeout(() => {
-      void this.sortedEl.offsetWidth;
-      this.sortedEl.classList.add("show");
-    }, Math.max(0, afterMs - 250));
-    (this.sortedEl as unknown as { t?: number }).t = window.setTimeout(() => this.sortedEl.classList.add("out"), afterMs + 2600);
   }
 
   // ---------------------------------------------------------------- dialogs
@@ -642,6 +694,12 @@ export class Chrome {
       else download(`${fileStem(m)}.csv`, toCsv(m, b.state.list()), "text/csv");
     });
   }
+}
+
+/** Where the demo was opened from, if it was a board of yours. */
+function demoBack(): string | null {
+  const back = new URLSearchParams(location.search).get("back");
+  return back && /^\/b\/[A-Za-z0-9]+$/.test(back) ? back : null;
 }
 
 function download(name: string, text: string, type: string) {

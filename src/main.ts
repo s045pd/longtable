@@ -1,5 +1,5 @@
 // Routes: "/" is the front page, "/b/<id>" is a board, "/new?template=…"
-// starts one. In production boards are live (the Worker); `npm run dev`
+// starts one, "/demo" plays the whole story on a board of its own. In production boards are live (the Worker); `npm run dev`
 // without a Worker keeps them on this device (add ?live to force live).
 import "@fontsource-variable/inter/wght.css";
 import "@fontsource-variable/bricolage-grotesque/wght.css";
@@ -40,6 +40,10 @@ function route() {
     const template = (TEMPLATES as readonly string[]).includes(t ?? "") ? (t as TemplateName) : "blank";
     if (t) history.replaceState({}, "", `/b/${m[1]}`);
     new Board(app, m[1], { live: LIVE, template });
+    return;
+  }
+  if (location.pathname === "/demo" || location.pathname === "/demo/") {
+    new Board(app, "demo", { live: false, demo: true });
     return;
   }
   if (location.pathname === "/new") {

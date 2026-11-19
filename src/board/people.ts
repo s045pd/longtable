@@ -88,6 +88,19 @@ export class People {
     if (p.c !== undefined) s.lastMove = performance.now();
   }
 
+  /** A click: a ring that opens out from someone's cursor (the demo's double-clicks and presses). */
+  click(pid: string) {
+    const s = this.all.get(pid);
+    if (!s || !s.seen) return;
+    const ring = document.createElement("div");
+    ring.className = "click-ring";
+    ring.style.setProperty("--c", s.color);
+    ring.style.left = `${s.sx}px`;
+    ring.style.top = `${s.sy}px`;
+    this.layer.append(ring);
+    setTimeout(() => ring.remove(), 600);
+  }
+
   remove(pid: string) {
     const s = this.all.get(pid);
     if (!s) return;

@@ -7,7 +7,8 @@
 // lays the notes out in day columns for everyone; undo takes it back; the
 // board survives a reload; a day picked by hand, or by dragging a note into
 // a column, reaches the other person and decides the tidy and the export;
-// the phone layout loads; no page errors anywhere.
+// the phone layout loads; the demo plays through on a board of its own and
+// can be stopped; no page errors anywhere.
 import { spawn } from "node:child_process";
 import { chromium, devices } from "playwright";
 
@@ -192,6 +193,30 @@ try {
   const vh = P.viewportSize().height;
   check(bar && bar.y > vh - 120 && bar.x >= 0 && bar.x + bar.width <= 390, "on a phone the toolbar sits at the bottom, inside the screen");
   check((await P.evaluate(() => document.documentElement.scrollWidth)) <= 390, "no sideways scroll on a phone");
+
+  // The demo: a button in the corner of every board, and the whole story on a board of its own.
+  check((await A.$eval(".demo-controls [data-demo='play']", (b) => b.textContent)).includes("Play the demo"), "every board has a Play the demo button in the corner");
+  const D = await person(browser, "Viewer", "#8FD0FF");
+  await D.goto(`${base}/demo?back=/b/${id}`);
+  await D.waitForSelector(".board-app.demo-playing", { timeout: 5000 });
+  await D.waitForFunction(() => !document.querySelector(".board-app").classList.contains("demo-playing"), null, { timeout: 60000, polling: 500 }).then(
+    () => check(true, "the demo plays to the end on its own"),
+    () => check(false, "the demo plays to the end on its own"),
+  );
+  const demoEnd = await D.evaluate(() => ({
+    notes: document.querySelectorAll(".item.note").length,
+    week: !!document.querySelector(".item.week"),
+    buttons: [...document.querySelectorAll(".demo-controls button")].map((b) => b.dataset.demo),
+  }));
+  check(demoEnd.notes === 24 && demoEnd.week, `it ends on the tidied week (${demoEnd.notes} notes, week ${demoEnd.week})`);
+  check(demoEnd.buttons.join(",") === "replay,own,back", "then offers Replay, Make your own board and Back to your board");
+  const after = await (await fetch(`${base}/api/boards/${id}/snapshot`)).json();
+  check(!after.items.some((it) => it.id === "n-double-sun"), "the demo never touches a real board");
+  await D.click(".demo-controls [data-demo='replay']");
+  await D.waitForSelector(".board-app.demo-playing", { timeout: 3000 });
+  await wait(2500);
+  await D.keyboard.press("Escape");
+  check(!(await D.evaluate(() => document.querySelector(".board-app").classList.contains("demo-playing"))), "Esc stops the demo and hands the board over");
 
   await browser.close();
 } catch (e) {

@@ -387,6 +387,11 @@ export function attachInput(board: Board) {
     return !!a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.isContentEditable);
   };
   addEventListener("keydown", (e) => {
+    // While the demo plays, the board is its; Esc stops it.
+    if (board.demo?.playing) {
+      if (e.key === "Escape") board.demo.stop();
+      return;
+    }
     if (typing() || board.root.querySelector(".dialog.open")) return;
     // While something is being edited, keys belong to it, not to the shortcuts.
     if (board.editor.id) {
@@ -489,7 +494,7 @@ export function attachInput(board: Board) {
 
   // Paste plain text: one note per line (up to 30), laid out in a row.
   addEventListener("paste", (e) => {
-    if (typing()) return;
+    if (typing() || board.demo?.playing) return;
     const text = e.clipboardData?.getData("text/plain")?.trim();
     if (!text) return;
     e.preventDefault();
