@@ -265,13 +265,15 @@ export class Chrome {
   private closeMenus() {
     this.reactMenu.classList.remove("open");
     this.zoomMenu.classList.remove("open");
-    this.whenMenu.classList.remove("open");
+    this.closeWhen();
   }
 
   /** Close the day picker if it is open; says whether it was. */
   closeWhen(): boolean {
     const open = this.whenMenu.classList.contains("open");
     this.whenMenu.classList.remove("open");
+    // Focus left in the hidden picker would swallow the board's shortcuts.
+    if (document.activeElement instanceof HTMLElement && this.whenMenu.contains(document.activeElement)) document.activeElement.blur();
     return open;
   }
 

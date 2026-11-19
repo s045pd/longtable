@@ -149,8 +149,9 @@ try {
     () => check(true, "a day Ana picks by hand shows on the note for Eli"),
     () => check(false, "a day Ana picks by hand shows on the note for Eli"),
   );
+  await A.click(".when-menu [data-when='done']");
   await A.keyboard.press("Escape");
-  await A.keyboard.press("Escape");
+  check((await A.$(".selbar.show")) === null, "after Done, the board's keys work again (Escape clears the selection)");
   await B.keyboard.press("Escape");
   await B.click(".tidy-pill");
   await A.waitForSelector(".item.week", { state: "attached", timeout: 5000 });
