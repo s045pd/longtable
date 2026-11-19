@@ -82,7 +82,7 @@ is public.
   everything live, but it can't change the board. The server refuses any
   change sent with a watch link.
 - **The owner.** Whoever starts a board owns it. The owner can do these
-  things from *Share → Board settings*:
+  things from *Settings* in the top bar:
   - Set, change or turn off a **password**. Everyone else needs the password
     once on each device. Changing it sends everyone else to the password
     screen, including people who are on the board right then. After five

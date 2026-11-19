@@ -102,7 +102,7 @@ export class Chrome {
       "beforeend",
       `
       <header class="topbar">
-        <a class="home" href="/" aria-label="Longtable home"><span class="mark-slot"></span></a>
+        <button class="home" aria-label="Your boards" aria-haspopup="menu" title="Your boards"><span class="mark-slot"></span><svg class="caret" viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M3 4.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
         <div class="names">
           <span class="client" role="textbox" aria-label="Who the board is for" spellcheck="false"></span>
           <span class="slash">/</span>
@@ -110,6 +110,7 @@ export class Chrome {
         </div>
         <div class="right">
           <div class="avatars"></div>
+          <button class="btn ghost settings-btn" aria-label="Board settings" title="Board settings">${icon("gear")}<span>Settings</span></button>
           <button class="btn ghost share">${icon("share")}<span>Share</span></button>
           <button class="btn ghost export">${icon("export")}<span>Export week</span></button>
           <button class="zoom" aria-label="Zoom" aria-haspopup="menu">100%</button>
@@ -218,7 +219,7 @@ export class Chrome {
       this.closeMenus();
     });
     document.addEventListener("pointerdown", (e) => {
-      if (!(e.target as HTMLElement).closest(".menu, .react, .zoom, .day-tag, .who-tag, [data-act='day'], [data-demo='boards']")) this.closeMenus();
+      if (!(e.target as HTMLElement).closest(".menu, .react, .zoom, .day-tag, .who-tag, [data-act='day'], [data-demo='boards'], .topbar .home")) this.closeMenus();
     });
     this.whenMenu.addEventListener("pointerdown", (e) => e.stopPropagation());
     this.whenMenu.addEventListener("click", (e) => {
@@ -259,6 +260,16 @@ export class Chrome {
       e.stopPropagation();
     });
     $(".share").addEventListener("click", () => this.share());
+    $(".settings-btn").addEventListener("click", () => this.settings());
+    const home = $(".home");
+    home.addEventListener("click", () => this.openBoards(home, "below"));
+    this.boardsMenu.addEventListener("click", (e) => {
+      const act = (e.target as HTMLElement).closest<HTMLElement>("[data-menu]")?.dataset.menu;
+      if (!act) return;
+      this.closeMenus();
+      if (act === "settings") this.settings();
+      else if (act === "share") this.share();
+    });
     $(".export").addEventListener("click", () => this.exportWeek());
     this.pill.addEventListener("click", () => board.tidy());
     this.top.querySelector(".avatars")!.addEventListener("click", (e) => {
@@ -333,6 +344,7 @@ export class Chrome {
     this.reactMenu.classList.remove("open");
     this.zoomMenu.classList.remove("open");
     this.boardsMenu.classList.remove("open");
+    document.querySelector(".topbar .home")?.setAttribute("aria-expanded", "false");
     return this.closeWhen() || open;
   }
 
@@ -610,22 +622,38 @@ export class Chrome {
         (back ? `<button class="sample-btn demo-btn" data-demo="back">Back<span class="wide"> to your board</span></button>` : "");
   }
 
-  /** The boards you have opened on this device, as a menu above the button. */
-  private openBoards(by: HTMLElement) {
+  /**
+   * The boards opened on this device, to jump straight to another one, with
+   * this board first and a way to start a new one. Above the corner button,
+   * or under the logo in the top bar.
+   */
+  private openBoards(by: HTMLElement, where: "above" | "below" = "above") {
     const open = this.boardsMenu.classList.contains("open");
     this.closeMenus();
     if (open) return;
+    const b = this.board;
+    const here = b.demo || b.access?.local ? null : b.id;
     const when = (at: number) => new Date(at).toLocaleDateString(undefined, { day: "numeric", month: "short" });
-    this.boardsMenu.innerHTML = recentBoards()
-      .map((r) => `<a href="/b/${escapeHtml(r.id)}" role="menuitem"><span>${escapeHtml(r.title || "Untitled board")}</span><time>${when(r.at)}</time></a>`)
-      .join("");
+    const others = recentBoards().filter((r) => r.id !== here);
+    const title = boardTitle(b.state.meta);
+    this.boardsMenu.innerHTML = `
+      <div class="menu-head">Your boards<small>on this device</small></div>
+      ${here ? `<div class="here" aria-current="page"><i style="--c:${b.me.color}"></i><span>${escapeHtml(title)}</span><small>Open now</small></div>` : ""}
+      ${others.map((r) => `<a href="/b/${escapeHtml(r.id)}" role="menuitem"><span>${escapeHtml(r.title || "Untitled board")}</span><time>${when(r.at)}</time></a>`).join("")}
+      ${!others.length ? `<p class="menu-empty">Other boards you open on this device show up here.</p>` : ""}
+      <hr />
+      <a href="/new?template=blank" role="menuitem" class="act">${icon("plus")}<span>New blank board</span></a>
+      ${here ? `<button data-menu="settings" role="menuitem" class="act">${icon("gear")}<span>Board settings</span></button>` : ""}
+      <a href="/" role="menuitem" class="act">${icon("left")}<span>Front page and demo</span></a>`;
     this.boardsMenu.classList.add("open");
+    by.setAttribute("aria-expanded", "true");
     const r = by.getBoundingClientRect();
     const m = this.boardsMenu.getBoundingClientRect();
-    let top = r.top - m.height - 8;
+    let top = where === "below" ? r.bottom + 8 : r.top - m.height - 8;
     if (top < 8) top = r.bottom + 8;
     this.boardsMenu.style.left = `${Math.round(Math.max(8, Math.min(innerWidth - m.width - 8, r.left)))}px`;
     this.boardsMenu.style.top = `${Math.round(top)}px`;
+    this.boardsMenu.querySelector<HTMLElement>("a, button")?.focus({ preventScroll: true });
   }
 
   setStatus(s: LinkStatus) {

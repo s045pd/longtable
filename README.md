@@ -54,6 +54,9 @@ Drag to move, `Alt`-drag to copy, paste a short list to get one note per line.
 Vote with dots in your colour and send reactions that float up from your
 cursor.
 
+Click the logo for **Your boards**: every board opened on this device, one
+click away, with no link to find again.
+
 </td>
 <td width="50%"><img src="docs/images/board.png" alt="The Pell &amp; Rye board with Eli's cursor on a note he selected and “Bo is typing…” over a new note." /></td>
 </tr>
@@ -183,7 +186,7 @@ the `#`, and browsers never send that part to a server, so it stays out of
 logs. **Share** gives two links: one that can **edit**, and one that can
 **watch** (see everything live, point and react, but change nothing).
 
-Whoever starts a board owns it. Under **Share → Board settings** the owner can:
+Whoever starts a board owns it. Under **Settings** in the top bar the owner can:
 
 - **add, change or remove a password.** Everyone else needs it once per
   device, and changing it sends people who are on the board right then back

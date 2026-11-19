@@ -326,6 +326,10 @@ export class Board {
         for (const v of this.views.values()) if (v.item.type === "note" || v.item.type === "week") v.paint();
       }
       this.chrome.onMeta();
+      // "Your boards" shows the new name too.
+      if (this.ready && !this.demo && (op.set.client !== undefined || op.set.file !== undefined)) {
+        rememberBoard(this.id, [this.state.meta.client, this.state.meta.file].filter(Boolean).join(" · "));
+      }
       return;
     }
     const id = op.op === "put" ? op.item.id : op.id;

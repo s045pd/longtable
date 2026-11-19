@@ -833,8 +833,19 @@ a.btn {
 .topbar .home {
   display: flex;
   align-items: center;
-  padding: 6px;
+  gap: 4px;
+  padding: 6px 5px 6px 6px;
   border-radius: 8px;
+  color: var(--muted);
+}
+.topbar .home .caret {
+  transition: transform 0.15s;
+}
+.topbar .home[aria-expanded="true"] {
+  background: var(--hover);
+}
+.topbar .home[aria-expanded="true"] .caret {
+  transform: rotate(180deg);
 }
 .topbar .home:hover {
   background: var(--hover);
@@ -1578,9 +1589,75 @@ a.btn {
   display: none;
 }
 .boards-menu {
-  min-width: 240px;
+  min-width: 260px;
   max-width: min(360px, calc(100vw - 16px));
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
   z-index: 40;
+}
+.boards-menu .menu-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 10px 4px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.boards-menu .menu-head small {
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.boards-menu .here {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: var(--hover);
+  font-size: 14px;
+  font-weight: 600;
+}
+.boards-menu .here i {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--c);
+}
+.boards-menu .here span {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.boards-menu .here small {
+  font: 12px var(--mono);
+  color: var(--muted);
+  font-weight: 400;
+}
+.boards-menu .menu-empty {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+.boards-menu hr {
+  margin: 4px 2px;
+  border: 0;
+  border-top: 1px solid var(--bar-line);
+}
+.boards-menu .act {
+  gap: 10px;
+}
+.boards-menu .act svg {
+  flex: none;
+  color: var(--muted);
 }
 .boards-menu a {
   display: flex;
@@ -1817,13 +1894,27 @@ a.btn {
   .names .file {
     max-width: 38vw;
   }
+  /* Room for the board's name: a smaller table, no caret, tighter buttons. */
+  .topbar .home {
+    padding: 6px 4px;
+  }
+  .topbar .home .mark {
+    width: 32px;
+    height: 17px;
+  }
+  .topbar .home .caret {
+    display: none;
+  }
+  .topbar .right {
+    gap: 4px;
+  }
   .topbar .btn {
-    width: 38px;
+    width: 36px;
     padding: 0;
   }
   .zoom {
-    min-width: 52px;
-    padding: 0 6px;
+    min-width: 46px;
+    padding: 0 4px;
     font-size: 12px;
   }
   .avatar {

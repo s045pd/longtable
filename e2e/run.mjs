@@ -410,12 +410,16 @@ try {
   check(!snap.items.some((it) => it.id === "sneakysneaky"), "and the board doesn't have it");
 
   // A password.
+  await A.click(".topbar .share");
+  await A.click(".share-dialog [data-act='settings']");
+  await settle(A.waitForSelector(".settings-dialog.open", { timeout: 3000 }), "Share still leads to Board settings");
+  await A.click(".settings-dialog [data-close]");
+  // Board settings has a button of its own in the top bar.
   const settings = async () => {
-    await A.click(".topbar .share");
-    await A.click(".share-dialog [data-act='settings']");
+    await A.click(".topbar .settings-btn");
     await A.waitForSelector(".settings-dialog.open");
   };
-  await settings();
+  await settle(settings(), "the top bar's Settings button opens Board settings straight away");
   await A.click(".settings-dialog [data-act='pw']");
   await A.fill(".pw-dialog input[name=pw]", "rye-and-pell");
   await A.click(".pw-dialog button[type=submit]");
@@ -678,6 +682,51 @@ try {
     ro.send({ t: "admin", act: "delete" });
     await ro.next(["done"]);
     for (const x of [rs, ro]) x.close();
+  }
+
+  // Your boards: the logo opens the boards opened on this device, to jump
+  // straight to another one without going through the front page.
+  {
+    const one = await (await makeBoard("blank")).json();
+    const two = await (await makeBoard("blank")).json();
+    const named = [];
+    for (const [b, file] of [[one, "Launch party"], [two, "Q1 roadmap"]]) {
+      const r = await rawSession(b.id, { owner: b.owner });
+      await r.next(["init"]);
+      r.send({ t: "ops", tx: 1, ops: [{ op: "meta", set: { file } }] });
+      await r.next(["ack"]);
+      named.push(r);
+    }
+    const H = await person(browser, "Hal", "#8FD0FF");
+    await H.goto(`${base}/b/${one.id}#o=${one.owner}`);
+    await H.waitForSelector(".board-app .empty-hint.show", { timeout: 6000 });
+    await H.goto(`${base}/b/${two.id}#o=${two.owner}`);
+    await H.waitForSelector(".board-app .empty-hint.show", { timeout: 6000 });
+    await H.click(".topbar .home");
+    await settle(H.waitForSelector(".boards-menu.open", { timeout: 2000 }), "the logo opens Your boards");
+    const menu = await H.$eval(".boards-menu", (m) => ({
+      here: m.querySelector(".here")?.textContent ?? "",
+      links: [...m.querySelectorAll("a")].map((a) => [a.getAttribute("href"), a.textContent.trim()]),
+      settings: !!m.querySelector("[data-menu='settings']"),
+    }));
+    check(/Q1 roadmap/.test(menu.here) && /Open now/.test(menu.here), "with this board first, marked Open now");
+    check(menu.links.some(([href, t]) => href === `/b/${one.id}` && /Launch party/.test(t)), "and the other board by its name");
+    check(menu.links.some(([href]) => href === "/new?template=blank") && menu.settings && menu.links.some(([href]) => href === "/"), "plus New blank board, Board settings and the front page");
+    await H.keyboard.press("Escape");
+    check(!(await H.$eval(".boards-menu", (m) => m.classList.contains("open"))), "Escape closes it");
+    await H.click(".topbar .home");
+    await H.click(`.boards-menu a[href="/b/${one.id}"]`);
+    await settle(H.waitForFunction((id) => location.pathname === `/b/${id}` && document.querySelector(".names .file")?.textContent === "Launch party", one.id, { timeout: 6000 }), "one click opens the other board, no link needed");
+    check((await gateKind(H, 1500)) === null && (await H.$(".topbar .settings-btn")) !== null, "as its owner still (the keys stay on the device)");
+    await H.click(".topbar .home");
+    await H.click(".boards-menu [data-menu='settings']");
+    await settle(H.waitForSelector(".settings-dialog.open [data-act='delete']", { timeout: 3000 }), "Board settings is in the menu too, with Delete for the owner");
+    await H.context().close();
+    for (const r of named) {
+      r.send({ t: "admin", act: "delete" });
+      await r.next(["done"]);
+      r.close();
+    }
   }
 
   // An AI assistant plans on the board over MCP.

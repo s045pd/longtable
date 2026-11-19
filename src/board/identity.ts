@@ -45,11 +45,13 @@ export interface RecentBoard {
   at: number;
 }
 const RECENT = "longtable:recent";
+/** How many boards "Your boards" keeps. */
+const RECENT_MAX = 30;
 
 export function recentBoards(): RecentBoard[] {
   try {
     const v = JSON.parse(localStorage.getItem(RECENT) ?? "[]");
-    return Array.isArray(v) ? v.filter((b) => typeof b?.id === "string").slice(0, 8) : [];
+    return Array.isArray(v) ? v.filter((b) => typeof b?.id === "string").slice(0, RECENT_MAX) : [];
   } catch {
     return [];
   }
@@ -59,7 +61,7 @@ export function rememberBoard(id: string, title: string) {
   try {
     const list = recentBoards().filter((b) => b.id !== id);
     list.unshift({ id, title, at: Date.now() });
-    localStorage.setItem(RECENT, JSON.stringify(list.slice(0, 8)));
+    localStorage.setItem(RECENT, JSON.stringify(list.slice(0, RECENT_MAX)));
   } catch {
     // ignore
   }
