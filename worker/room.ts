@@ -10,6 +10,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { LIMITS, cleanColor, cleanCoord, cleanEffect, cleanName, cleanOp, cleanPresence, cleanReaction } from "../src/shared/schema";
 import { BoardState } from "../src/shared/state";
+import { withStrokes } from "../src/shared/attach";
 import { TEMPLATES, makeTemplate, type TemplateName } from "../src/shared/templates";
 import type { AdminAct, ClientMessage, DeniedReason, Effect, Item, Meta, Op, Person, PlanNote, PlanTrouble, Presence, Role, ServerMessage } from "../src/shared/types";
 import { newKey, randomId } from "../src/shared/ids";
@@ -347,7 +348,8 @@ export class BoardRoom extends DurableObject<Env> {
   /** Changes made from outside a socket (an AI over MCP): checked like anyone's, sent to everyone, written now. */
   private commitAs(ops: Op[], fx?: Effect): Op[] {
     const applied: Op[] = [];
-    for (const raw of ops) {
+    // What is drawn on a card, and lines between cards, follow it, as on the board.
+    for (const raw of withStrokes(this.state.items, ops)) {
       const op = cleanOp(raw, this.state.typeOf);
       if (!op) continue;
       if (op.op === "put" && !this.state.items.has(op.item.id) && this.state.items.size >= LIMITS.items) continue;

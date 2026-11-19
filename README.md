@@ -52,7 +52,9 @@ Click a face in the top bar and your view follows theirs.
 Double-click for a **note**, or pick a **heading**, **checklist** or **pen**.
 Drag to move, `Alt`-drag to copy, paste a short list to get one note per line.
 Vote with dots in your colour and send reactions that float up from your
-cursor.
+cursor. A pen mark drawn on a card, or ringed round it, stays with that card
+wherever it goes; an arrow from one card to another keeps pointing at both,
+even after Tidy up.
 
 Click the logo for **Your boards**: every board opened on this device, one
 click away, with no link to find again.

@@ -35,6 +35,8 @@ const int = (v: unknown, lo: number, hi: number): number | undefined =>
   typeof v === "number" && Number.isInteger(v) && v >= lo && v <= hi ? v : undefined;
 const color = (v: unknown): string | undefined => (typeof v === "string" && HEX.test(v) ? v.toUpperCase() : undefined);
 export const isId = (v: unknown): v is string => typeof v === "string" && ID.test(v);
+/** An item's id, or "" for none. */
+const idOrNone = (v: unknown): string | undefined => (v === "" || isId(v) ? v : undefined);
 
 function rows(v: unknown): CheckRow[] | undefined {
   if (!Array.isArray(v)) return undefined;
@@ -82,7 +84,7 @@ const FIELDS: Record<Item["type"], Record<string, (v: unknown) => unknown>> = {
   label: { text: (v) => str(v, LIMITS.label), color },
   check: { title: (v) => str(v, LIMITS.row), rows, color },
   photo: { art: (v) => (PHOTO_ARTS.includes(v as PhotoArt) ? v : undefined), caption: (v) => str(v, LIMITS.row) },
-  stroke: { color, width: (v) => num(v, 1, 40), pts: points },
+  stroke: { color, width: (v) => num(v, 1, 40), pts: points, on: idOrNone, from: idOrNone, to: idOrNone },
   week: { cols: (v) => (v === 7 || v === 8 ? v : undefined), of: isoOrNone },
 };
 const COMMON: Record<string, (v: unknown) => unknown> = {

@@ -3,7 +3,8 @@
 // pixels, so a click stays a click.
 import { looksLikeAChat } from "../shared/plan";
 import { planDrop, weeksOn } from "../shared/tidy";
-import type { Item, Op } from "../shared/types";
+import type { Item, Op, StrokeItem } from "../shared/types";
+import { anchorsOf, attachFor, linesTo, strokesOn } from "../shared/attach";
 import type { Board } from "./app";
 
 type Gesture =
@@ -27,6 +28,8 @@ type Gesture =
       wx: number;
       wy: number;
       start: Map<string, { x: number; y: number }>;
+      /** Lines from a carried card to one left behind, as they were: they stretch as it moves. */
+      lines: Map<string, { x: number; y: number; pts: number[] }>;
       lastSend: number;
       raise: Op[];
       /** Notes that sat in the week when the drag began. */
@@ -239,12 +242,16 @@ export function attachInput(board: Board) {
     // A week carries the notes in its columns.
     const carried = new Set(ids);
     for (const id of ids) if (board.state.items.get(id)?.type === "week") for (const n of board.weekNotes(id)) carried.add(n);
+    // A card carries what is drawn on it.
+    for (const s of strokesOn(board.state.items.values(), carried)) carried.add(s.id);
     const start = new Map<string, { x: number; y: number }>();
     for (const id of carried) {
       const it = board.state.items.get(id);
       if (it) start.set(id, { x: it.x, y: it.y });
     }
-    const raise = board.raise([...carried]);
+    // Lines to a lifted card rise with it (they stretch, not travel).
+    const lines = new Map(linesTo(board.state.items.values(), carried).filter((s) => !carried.has(s.id)).map((s) => [s.id, { x: s.x, y: s.y, pts: s.pts.slice() }]));
+    const raise = board.raise([...carried, ...lines.keys()]);
     const zBefore = raise.map((op) => (op.op === "patch" ? { op: "patch", id: op.id, set: { z: board.state.items.get(op.id)!.z } } : op)) as Op[];
     if (raise.length) board.commit(raise, { history: false });
     for (const id of carried) board.views.get(id)?.el.classList.add("lifted");
@@ -253,7 +260,7 @@ export function attachInput(board: Board) {
     const inWeek = new Set(weeks.flatMap((w) => board.weekNotes(w.id)));
     const leaving = [...carried].filter((id) => inWeek.has(id));
     const weekToo = weeks.some((w) => carried.has(w.id));
-    g = { kind: "drag", id: e.pointerId, wx, wy, start, lastSend: 0, raise: zBefore, leaving, weekToo };
+    g = { kind: "drag", id: e.pointerId, wx, wy, start, lines, lastSend: 0, raise: zBefore, leaving, weekToo };
     board.root.classList.add("dragging");
   }
 
@@ -299,6 +306,28 @@ export function attachInput(board: Board) {
           undo.push({ op: "patch", id, set: { x: s.x, y: s.y } });
           redo.push({ op: "patch", id, set: { x: it.x, y: it.y, z: it.z } });
         }
+        // Lines that stretched along: back as they were, or as they are now.
+        for (const [id, s] of g.lines) {
+          const it = board.state.items.get(id);
+          if (it?.type !== "stroke") continue;
+          undo.push({ op: "patch", id, set: { x: s.x, y: s.y, pts: s.pts } });
+          redo.push({ op: "patch", id, set: { x: it.x, y: it.y, z: it.z, pts: it.pts.slice() } });
+        }
+        // A stroke moved without its card(s) now hangs on what it was dropped on, if anything.
+        if (!cancelled) {
+          const start = g.start;
+          for (const id of start.keys()) {
+            const it = board.state.items.get(id);
+            if (it?.type !== "stroke") continue;
+            const anchors = anchorsOf(board.state.items, it);
+            if (anchors.length && anchors.every((a) => start.has(a))) continue;
+            const set = attachFor(board.state.items.values(), it);
+            if (set.on === (it.on ?? "") && set.from === (it.from ?? "") && set.to === (it.to ?? "")) continue;
+            undo.push({ op: "patch", id, set: { on: it.on ?? "", from: it.from ?? "", to: it.to ?? "" } });
+            redo.push({ op: "patch", id, set });
+            board.commit([{ op: "patch", id, set }], { history: false });
+          }
+        }
         // Send the final resting place for sure.
         board.link.ops(redo);
         board.root.classList.remove("dragging");
@@ -320,7 +349,9 @@ export function attachInput(board: Board) {
             // A tap with the pen leaves a dot.
             g.pts.push(0.5, 0.5);
           }
-          board.commit([{ op: "patch", id: it.id, set: { pts: g.pts } }], { history: false });
+          // Drawn on a card, around one, or from one card to another: it hangs on them from now on.
+          const set = attachFor(board.state.items.values(), { ...it, pts: g.pts } as StrokeItem);
+          board.commit([{ op: "patch", id: it.id, set: { pts: g.pts, ...(set.on ? { on: set.on } : {}), ...(set.from ? { from: set.from, to: set.to } : {}) } }], { history: false });
           board.remember([{ op: "del", id: it.id }], [{ op: "put", item: structuredClone(board.state.items.get(it.id)!) as Item }]);
         }
         break;

@@ -9,6 +9,7 @@
 import { ANY, ISO_DATE, addDays, noteDay, noteTime, noteWeek } from "./days";
 import { NOTE, PITCH_X, PITCH_Y, HEADER_GAP, bounds, union, type Box } from "./geometry";
 import type { Effect, Item, NoteItem, Op, WeekItem } from "./types";
+import { anchorsOf } from "./attach";
 
 export interface TidyPlan {
   ops: Op[];
@@ -75,7 +76,9 @@ export function planTidy(board: Item[], targetIds: string[] | null, newId: () =>
   for (const w of existing) for (const n of notesInWeek(w, allNotes)) noteIds.add(n.id);
   const notes = allNotes.filter((n) => noteIds.has(n.id));
   if (!notes.length) return null;
-  const others = targets.filter((it) => it.type !== "note" && it.type !== "week");
+  // Strokes on a card, and lines between cards, follow the cards (withStrokes), not into the line-up.
+  const items = new Map(board.map((it) => [it.id, it]));
+  const others = targets.filter((it) => it.type !== "note" && it.type !== "week" && !anchorsOf(items, it).length);
 
   // Group by week, then by day: Monday … Sunday, and ANY DAY in the board's week.
   const groups = new Map<string, NoteItem[][]>();

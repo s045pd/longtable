@@ -68,6 +68,11 @@ export interface StrokeItem extends BaseItem {
   color: string;
   width: number;
   pts: number[];
+  /** The card it was drawn on (or around): it moves, rises, copies and goes with it. "" or absent: none. */
+  on?: string;
+  /** A line from one card to another: its ends stay on both as they move (see shared/attach.ts). */
+  from?: string;
+  to?: string;
 }
 
 /**

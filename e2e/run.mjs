@@ -684,6 +684,94 @@ try {
     for (const x of [rs, ro]) x.close();
   }
 
+  // Pen marks on a card stay on it; a line from one card to another stays on both.
+  {
+    const made = await (await makeBoard("blank")).json();
+    const ro = await rawSession(made.id, { owner: made.owner });
+    await ro.next(["init"]);
+    const put = (id, text, x, y) => ({ op: "put", item: { id, type: "note", x, y, rot: 0, z: 1, by: "Script", color: "#FFE38A", text } });
+    ro.send({ t: "ops", tx: 1, ops: [put("tue", "Flyers to print Tue", -300, -100), put("wed", "Flyers out Wed", 300, 150), put("fri", "Cake stand Fri", -300, 300)] });
+    await ro.next(["ack"]);
+    const K = await person(browser, "Kai", "#FF9FC0");
+    await K.goto(`${base}/b/${made.id}#o=${made.owner}`);
+    await K.waitForSelector('.item[data-id="fri"] .shape', { state: "attached", timeout: 6000 });
+    await wait(600);
+    const centre = async (id) => {
+      const b = await K.locator(`.item[data-id="${id}"] .shape`).boundingBox();
+      return [b.x + b.width / 2, b.y + b.height / 2, b.width];
+    };
+    const draw = async (pts) => {
+      await K.mouse.move(pts[0][0], pts[0][1]);
+      await K.mouse.down();
+      for (const [x, y] of pts.slice(1)) await K.mouse.move(x, y, { steps: 2 });
+      await K.mouse.up();
+      await wait(150);
+    };
+    await K.keyboard.press("p");
+    const [fx, fy, fw] = await centre("fri");
+    await draw(Array.from({ length: 29 }, (_, i) => [fx + Math.cos((i / 28) * 2 * Math.PI) * fw * 0.62, fy + Math.sin((i / 28) * 2 * Math.PI) * fw * 0.58]));
+    const [tx, ty, tw] = await centre("tue");
+    const [wx2, wy2] = await centre("wed");
+    const arrow = Array.from({ length: 20 }, (_, i) => [tx + tw * 0.3 + ((wx2 - tw * 0.35 - tx - tw * 0.3) * i) / 19, ty + ((wy2 - ty) * i) / 19 - Math.sin((Math.PI * i) / 19) * 50]);
+    await draw([...arrow, [arrow[19][0] - 20, arrow[19][1] - 14], arrow[19], [arrow[19][0] - 24, arrow[19][1] + 8]]);
+    await K.keyboard.press("v");
+    const strokes = async () => (await (await api(`/api/boards/${made.id}/snapshot`, { "x-longtable-owner": made.owner })).json()).items.filter((it) => it.type === "stroke");
+    let st = await strokes();
+    const ring = st.find((s) => s.on === "fri");
+    const link = st.find((s) => s.from === "tue" && s.to === "wed");
+    check(!!ring, "a ring drawn round a note belongs to it");
+    check(!!link, "an arrow from one note to another links the two");
+    // Drag Friday's note and Wednesday's.
+    const dragBy = async (id, dx, dy) => {
+      const [x, y, w] = await centre(id);
+      await K.mouse.move(x, y - w * 0.3);
+      await K.mouse.down();
+      await K.mouse.move(x + dx / 2, y - w * 0.3 + dy / 2, { steps: 5 });
+      await K.mouse.move(x + dx, y - w * 0.3 + dy, { steps: 5 });
+      await K.mouse.up();
+      await wait(400);
+    };
+    await dragBy("fri", 240, -40);
+    await dragBy("wed", -60, 160);
+    const items = async () => new Map((await (await api(`/api/boards/${made.id}/snapshot`, { "x-longtable-owner": made.owner })).json()).items.map((it) => [it.id, it]));
+    let m = await items();
+    const ringNow = m.get(ring.id);
+    check(Math.abs(ringNow.x - ring.x - (m.get("fri").x - (-300))) <= 1 && Math.abs(ringNow.y - ring.y - (m.get("fri").y - 300)) <= 1, "dragging the note takes its ring along, for everyone");
+    check(ringNow.z > m.get("fri").z, "and keeps it on top of the note");
+    const endOf = (s) => [s.x + s.pts.at(-2), s.y + s.pts.at(-1)];
+    const startOf = (s) => [s.x + s.pts[0], s.y + s.pts[1]];
+    const [ex0, ey0] = endOf(link);
+    const [ex1, ey1] = endOf(m.get(link.id));
+    const wedMoved = [m.get("wed").x - 300, m.get("wed").y - 150];
+    check(Math.hypot(ex1 - ex0 - wedMoved[0], ey1 - ey0 - wedMoved[1]) < 3 && Math.hypot(startOf(m.get(link.id))[0] - startOf(link)[0], startOf(m.get(link.id))[1] - startOf(link)[1]) < 3, "moving one end's note stretches the arrow, its other end staying put");
+    // Tidy up: the ring stays round Friday, the arrow still runs Tuesday → Wednesday.
+    await K.click(".tidy-pill");
+    await wait(3500);
+    m = await items();
+    const r2 = m.get(ring.id);
+    check(Math.abs(r2.x - m.get("fri").x - (ring.x - -300)) <= 2 && Math.abs(r2.y - m.get("fri").y - (ring.y - 300)) <= 2, "Tidy up carries the ring with its note into Friday");
+    const l2 = m.get(link.id);
+    const tueOff = [startOf(link)[0] - -300, startOf(link)[1] - -100];
+    check(Math.hypot(startOf(l2)[0] - m.get("tue").x - tueOff[0], startOf(l2)[1] - m.get("tue").y - tueOff[1]) < 3, "and the arrow still starts on Tuesday's note");
+    // Deleting the note takes what is drawn on it; Undo brings both back.
+    {
+      const b = await K.locator('.item[data-id="fri"] .shape').boundingBox();
+      await K.mouse.click(b.x + b.width / 2, b.y + b.height * 0.75);
+    }
+    await K.keyboard.press("Delete");
+    await wait(300);
+    m = await items();
+    check(!m.has("fri") && !m.has(ring.id), "deleting the note deletes its ring");
+    await K.keyboard.press("Control+z");
+    await wait(400);
+    m = await items();
+    check(m.has("fri") && m.has(ring.id), "Undo brings both back");
+    await K.context().close();
+    ro.send({ t: "admin", act: "delete" });
+    await ro.next(["done"]);
+    ro.close();
+  }
+
   // Your boards: the logo opens the boards opened on this device, to jump
   // straight to another one without going through the front page.
   {

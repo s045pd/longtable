@@ -9,12 +9,13 @@ import { randomId } from "../shared/ids";
 import { BoardState } from "../shared/state";
 import { FLIGHT, notesInWeek, planTidy, waveDelay, weeksOn } from "../shared/tidy";
 import type { TemplateName } from "../shared/templates";
-import type { Access, AdminAct, DeniedReason, Effect, Item, NoteItem, Op, Person, PlanNote, Presence, ReactionKind } from "../shared/types";
+import type { Access, AdminAct, DeniedReason, Effect, Item, NoteItem, Op, Person, PlanNote, Presence, ReactionKind, StrokeItem } from "../shared/types";
 import { Camera, type Insets } from "./camera";
 import { Chrome } from "./chrome";
 import { measureLabel, resetFits } from "./fit";
 import { Grid } from "./grid";
 import { takeFlash } from "./boards";
+import { anchorsOf, stackOrder, withStrokes } from "../shared/attach";
 import { boardLink, forgetBoard, loadIdentity, putCarry, rememberBoard, saveIdentity, saveKeys, takeCarry, deviceId, type Identity } from "./identity";
 import { attachInput } from "./input";
 import { DemoLink, LiveLink, LocalLink, type BoardKeys, type InitData, type Link, type LinkStatus } from "./net";
@@ -352,7 +353,7 @@ export class Board {
     else if (this.editor.id === id && remote) {
       // Someone moved what you are typing into: follow the move, keep your words.
       v.update({ ...it, ...this.editor.liveFields() } as Item, motion(id));
-    } else v.update(it, motion(id));
+    } else v.update(it, motion(anchorsOf(this.state.items, it).at(-1) ?? id));
     this.selDirty = true;
   }
 
@@ -369,6 +370,8 @@ export class Board {
     }
     const inverse: Op[] = [];
     const applied: Op[] = [];
+    // What is drawn on a card moves and goes with it.
+    ops = withStrokes(this.state.items, ops);
     for (const op of ops) {
       const back = this.state.inverse(op);
       if (!this.state.apply(op)) continue;
@@ -489,7 +492,8 @@ export class Board {
   raise(ids: string[]): Op[] {
     let z = this.state.topZ();
     const ops: Op[] = [];
-    const sorted = ids.map((id) => this.state.items.get(id)!).filter((it) => it && it.type !== "week").sort((a, b) => a.z - b.z);
+    // Each card's strokes right after it, so the card never covers them.
+    const sorted = stackOrder(this.state.items, ids);
     for (const it of sorted) if (it.z <= z || sorted.length > 1) ops.push({ op: "patch", id: it.id, set: { z: ++z } });
     return ops;
   }
@@ -530,20 +534,40 @@ export class Board {
     this.setSelection([]);
   }
 
-  /** Copies of the given items, offset, on top. Returns the copies' ids. */
+  /**
+   * Copies of the given items, offset, on top. What is drawn on a copied card,
+   * and lines between two copied cards, come along. Returns the copies' ids.
+   */
   duplicate(ids: string[], dx = 32, dy = 32, select = true): string[] {
     let z = this.state.topZ();
+    const items = this.state.items;
     const copies: Item[] = [];
-    for (const id of ids) {
-      const it = this.state.items.get(id);
-      if (!it || it.type === "week") continue;
-      const copy = { ...structuredClone(it), id: this.newItemId(), x: it.x + dx, y: it.y + dy, z: ++z, by: this.me.name } as Item;
+    const made = new Map<string, string>();
+    const copyOf = (it: Item, set: Partial<StrokeItem> = {}) => {
+      const copy = { ...structuredClone(it), id: this.newItemId(), x: it.x + dx, y: it.y + dy, z: ++z, by: this.me.name, ...set } as Item;
       if (copy.type === "note") delete copy.votes;
       copies.push(copy);
+      made.set(it.id, copy.id);
+      return copy;
+    };
+    const chosen = new Set(ids);
+    const top: string[] = [];
+    for (const it of stackOrder(items, ids)) {
+      const anchors = anchorsOf(items, it);
+      // Comes along with its card(s) below.
+      if (anchors.length && anchors.every((a) => chosen.has(a))) continue;
+      // A stroke copied without its card(s) is free.
+      top.push(copyOf(it, it.type === "stroke" ? { on: "", from: "", to: "" } : {}).id);
+    }
+    for (const it of items.values()) {
+      if (it.type !== "stroke" || made.has(it.id)) continue;
+      const anchors = anchorsOf(items, it);
+      if (!anchors.length || !anchors.every((a) => made.has(a))) continue;
+      copyOf(it, anchors.length === 1 ? { on: made.get(anchors[0]) } : { from: made.get(anchors[0]), to: made.get(anchors[1]) });
     }
     this.commit(copies.map((item) => ({ op: "put", item }) as Op));
-    if (select) this.setSelection(copies.map((c) => c.id));
-    return copies.map((c) => c.id);
+    if (select) this.setSelection(top);
+    return top;
   }
 
   recolor(color: string) {
