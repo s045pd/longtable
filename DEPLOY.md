@@ -101,6 +101,10 @@ is public.
   the notes that name a day, as an `.ics` feed. Making new links or setting
   or changing the password switches the old calendar link off; subscribed
   calendars then stop updating until someone subscribes to the new one.
+- **MCP address.** *Share → Plan with an AI assistant* hands people who can
+  edit a fourth link, for AI assistants (see below). It has a key of its own
+  and can change the board like the edit link. New links or a new password
+  switch it off.
 - Anyone can choose **Forget this board here** to take it off their own
   device.
 
@@ -150,6 +154,28 @@ the calendar rather than appearing twice. How often a calendar really looks
 is up to it: Apple and Outlook within hours, Google sometimes only once a
 day. A deleted board's feed answers *410 Gone*, and calendars drop it.
 
+## AI assistants (MCP)
+
+Each board answers the [Model Context Protocol](https://modelcontextprotocol.io)
+at `https://<your Longtable>/api/boards/<board>/mcp/<key>`: Streamable HTTP,
+JSON answers, no sessions, and CORS open so browser-based clients work too.
+Its tools read the board (`read_board`, `week_as_text`), change it
+(`add_notes`, `update_note`, `delete_notes`, `tidy_up`), give out the
+calendar (`calendar_link`) and draw the week (`week_picture`). Changes go to
+everyone on the board live, through the same checks as anyone's edits.
+One address can make 600 requests an hour to a board.
+
+- **Pictures** need [Browser Rendering](https://developers.cloudflare.com/browser-rendering/),
+  which the `browser` binding in `wrangler.jsonc` connects. A headless browser
+  opens the site's own `picture.html` and draws the week exactly like
+  *Export → Picture*. The free plan gives 10 minutes of browser time a day
+  and starts one browser every 20 seconds; a picture takes 3 to 6 seconds,
+  so that's about a hundred a day. A board can have 20 pictures an hour.
+  When the allowance is used up, or without the binding, the assistant gets
+  the week as text instead.
+- **To turn pictures off,** delete the `browser` block from `wrangler.jsonc`
+  and deploy again. The rest of MCP keeps working.
+
 ## Your own domain
 
 *Workers → your worker → Settings → Domains & Routes → Add → Custom domain*,
@@ -171,6 +197,7 @@ makes one note per line.) For more, Workers Paid is $5 a month.
 | 100,000 rows written | each changed note is written at most once a second | plenty for a team |
 | 5 GB stored | a board is about 50–200 KB | tens of thousands of boards |
 | 10,000 Workers AI neurons | reading pasted chats, about 40 to 80 a chat | about 150 chats |
+| 10 minutes of Browser Rendering | pictures for AI assistants, 3 to 6 seconds each | about 100 pictures |
 
 A subscribed calendar looking for changes costs one Worker request and one
 Durable Object request, so even 100 calendars checking every hour use only a

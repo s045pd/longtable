@@ -2352,6 +2352,80 @@ a.btn {
 .share-link .linkrow {
   margin: 8px 0 0;
 }
+/* Plan with an AI assistant: the board's MCP address, folded away. */
+.share-ai {
+  margin: 16px 0 0;
+  border-radius: 12px;
+  background: var(--raise);
+}
+.share-ai summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  list-style: none;
+  cursor: pointer;
+}
+.share-ai summary::-webkit-details-marker {
+  display: none;
+}
+.share-ai summary > svg {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  color: #b9bcc6;
+}
+.share-ai summary > svg:last-child {
+  margin-left: auto;
+  transition: transform 0.15s;
+}
+.share-ai[open] summary > svg:last-child {
+  transform: rotate(90deg);
+}
+.share-ai summary span {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  font-size: 14px;
+}
+.share-ai summary small {
+  color: var(--muted);
+  font-size: 13px;
+}
+.share-ai .linkrow,
+.share-ai .ai-how {
+  margin-left: 12px;
+  margin-right: 12px;
+}
+.share-ai .linkrow {
+  margin-top: 2px;
+}
+.share-ai .ai-how {
+  display: grid;
+  gap: 6px;
+  margin-top: 4px;
+  margin-bottom: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  color: #b9bcc6;
+}
+.share-ai .ai-how b {
+  margin-right: 6px;
+  color: var(--chalk);
+}
+.share-ai .ai-how code {
+  font: 12px var(--mono);
+  color: var(--chalk);
+  overflow-wrap: anywhere;
+}
+.share-ai .ai-how .linkish {
+  margin-left: 4px;
+}
+.share-ai .fine {
+  padding: 0 12px 12px;
+}
 .share-status {
   display: flex;
   align-items: center;

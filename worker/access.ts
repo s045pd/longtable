@@ -11,6 +11,8 @@ export interface Lock {
   view: string;
   /** The key of the calendar feed; boards from before calendars get one when first opened. */
   cal?: string;
+  /** The key of the board's MCP address, for AI assistants; it can change the board. Boards from before get one when first opened. */
+  mcp?: string;
   /** SHA-256 of the owner key (the owner key itself is never stored). */
   owner: string;
   /** The password, as PBKDF2-SHA-256 of it with its own salt. */
@@ -66,7 +68,7 @@ export async function checkPassword(pw: unknown, stored: NonNullable<Lock["pw"]>
 /** A new board's keys. The owner key goes to the person who made the board and is stored only as a hash. */
 export async function newLock(): Promise<{ lock: Lock; ownerKey: string }> {
   const ownerKey = newKey();
-  return { lock: { edit: newKey(), view: newKey(), cal: newKey(), owner: await sha256(ownerKey) }, ownerKey };
+  return { lock: { edit: newKey(), view: newKey(), cal: newKey(), mcp: newKey(), owner: await sha256(ownerKey) }, ownerKey };
 }
 
 /** Which role a hello's keys give, or null when they open nothing. */
@@ -83,7 +85,7 @@ export const accessFor = (lock: Lock, role: Role): Access => ({
   password: !!lock.pw,
   view: lock.view,
   ...(lock.cal ? { cal: lock.cal } : {}),
-  ...(role === "viewer" ? {} : { edit: lock.edit }),
+  ...(role === "viewer" ? {} : { edit: lock.edit, ...(lock.mcp ? { mcp: lock.mcp } : {}) }),
 });
 
 /** An IANA time zone name the runtime knows, or undefined. */

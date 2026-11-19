@@ -85,7 +85,7 @@ function loadArt(art: PhotoItem["art"]): Promise<HTMLImageElement | null> {
 }
 
 /** The picture, as a PNG. */
-export async function weekPicture(meta: Meta, items: Item[], opts: { who?: string } = {}): Promise<Blob> {
+export async function weekPicture(meta: Meta, items: Item[], opts: { who?: string; scale?: number; today?: string } = {}): Promise<Blob> {
   await Promise.all(
     [`600 17px ${SANS}`, `700 20px ${SANS}`, `700 38px ${DISPLAY}`, `500 12px ${MONO}`, `600 22px ${HAND}`].map((f) => document.fonts.load(f).catch(() => [])),
   );
@@ -137,7 +137,7 @@ export async function weekPicture(meta: Meta, items: Item[], opts: { who?: strin
   }
   const height = y + 40;
 
-  const scale = Math.min(2, 14000 / Math.max(width, height));
+  const scale = Math.min(opts.scale ?? 2, 14000 / Math.max(width, height));
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(width * scale);
   canvas.height = Math.round(height * scale);
@@ -168,7 +168,7 @@ export async function weekPicture(meta: Meta, items: Item[], opts: { who?: strin
     if (keys.length > 1 && band.key) {
       ctx.font = `600 12px ${MONO}`;
       ctx.fillStyle = MUTED;
-      const now = mondayOf(localIso());
+      const now = mondayOf(opts.today || localIso());
       const label = band.key === now ? "THIS WEEK" : band.key === addDays(now, 7) ? "NEXT WEEK" : "";
       ctx.fillText(`${label ? `${label} · ` : ""}${short(band.key).toUpperCase()} – ${short(addDays(band.key, 6)).toUpperCase()}`, PAD, band.top - 10);
     }

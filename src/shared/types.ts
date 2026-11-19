@@ -146,6 +146,8 @@ export interface Access {
   view: string;
   /** The key of the board's calendar feed (read-only, for calendar apps to subscribe to). */
   cal?: string;
+  /** The key of the board's MCP address, for AI assistants (owners and editors only: it can change the board). */
+  mcp?: string;
   /**
    * The owner key, sent once: when a board made before boards had keys is
    * first opened, whoever opens it becomes its owner.

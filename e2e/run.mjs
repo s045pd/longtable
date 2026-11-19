@@ -15,8 +15,8 @@
 // gone for everyone; with a team password nobody else can start boards; the
 // security headers are there. A chat becomes a plan and the week a calendar;
 // notes with dates of their own go to their own weeks, whose a note is shows
-// as a tag, and the export, picture and calendar can be just one person's.
-// No page errors anywhere.
+// as a tag, and the export, picture and calendar can be just one person's;
+// an AI assistant plans on the board over MCP. No page errors anywhere.
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -389,7 +389,7 @@ try {
 
   // The watch link.
   await A.click(".topbar .share");
-  const links = await A.$$eval(".share-dialog input[readonly]", (els) => els.map((e) => e.value));
+  const links = await A.$$eval(".share-dialog .share-link input[readonly]", (els) => els.map((e) => e.value));
   check(links.length === 2 && links[0].endsWith(`#k=${edit}`) && /#v=[a-z0-9]{26}$/.test(links[1]), "Share offers an edit link and a watch link");
   const viewLink = links[1];
   const viewKey = viewLink.split("#v=")[1];
@@ -678,6 +678,72 @@ try {
     ro.send({ t: "admin", act: "delete" });
     await ro.next(["done"]);
     for (const x of [rs, ro]) x.close();
+  }
+
+  // An AI assistant plans on the board over MCP.
+  {
+    const res = await fetch(`${base}/api/boards`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ template: "blank", ...(TEAM ? { password: TEAM } : {}) }) });
+    const made = await res.json();
+    const rs = await rawSession(made.id, { key: made.edit });
+    const init = await rs.next(["init"]);
+    const rv = await rawSession(made.id, { key: init.access.view });
+    const vinit = await rv.next(["init"]);
+    check(/^[a-z0-9]{26}$/.test(init.access.mcp ?? "") && !vinit.access.mcp, "the edit link gets the board’s MCP address, the watch link doesn’t");
+    const mcpUrl = (k) => `${base}/api/boards/${made.id}/mcp/${k}`;
+    let rpcId = 0;
+    const rpc = async (method, params, k = init.access.mcp) => {
+      const r = await fetch(mcpUrl(k), { method: "POST", headers: { "content-type": "application/json", accept: "application/json, text/event-stream" }, body: JSON.stringify({ jsonrpc: "2.0", id: ++rpcId, method, ...(params ? { params } : {}) }) });
+      return { status: r.status, body: await r.json().catch(() => null) };
+    };
+    const tool = async (name, args = {}) => (await rpc("tools/call", { name, arguments: args })).body?.result;
+    const hi = await rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "e2e", version: "1" } });
+    check(hi.status === 200 && hi.body?.result?.protocolVersion === "2025-06-18" && hi.body.result.serverInfo?.name === "longtable", "an MCP client connects to the board’s address");
+    const listed = (await rpc("tools/list")).body?.result?.tools?.map((t) => t.name) ?? [];
+    check(["read_board", "add_notes", "update_note", "delete_notes", "tidy_up", "week_as_text", "week_picture", "calendar_link"].every((t) => listed.includes(t)), `and finds the board’s tools (${listed.join(", ")})`);
+    check((await rpc("tools/list", null, "a".repeat(26))).status === 404, "a made-up MCP key gets nothing");
+    const P = await person(browser, "Fen", "#A8E6B8");
+    await P.goto(`${base}/b/${made.id}#k=${made.edit}`);
+    await P.waitForSelector(".board-app .empty-hint.show", { timeout: 6000 });
+    const iso = (d) => d.toISOString().slice(0, 10);
+    const today = iso(new Date());
+    const later = iso(new Date(Date.now() + 7 * 86_400_000));
+    const added = await tool("add_notes", { notes: [{ text: "Call the printer", date: today, who: "Fen" }, { text: "Flyers out", date: later, time: "08:00", who: "Gil" }] });
+    check(added?.structuredContent?.added?.length === 2 && !added.isError, "the assistant adds notes with dates, times and people");
+    await settle(
+      P.waitForFunction(() => document.querySelectorAll(".item.note").length === 2 && document.querySelectorAll(".item.week").length === 2, null, { timeout: 6000 }),
+      "and they arrive live on the board, tidied into this week and next",
+    );
+    const tag = await P.$$eval(".item.note .who-tag span", (els) => els.map((e) => e.textContent).sort().join(","));
+    check(tag === "Fen,Gil", `with name tags (${tag})`);
+    const read = await tool("read_board");
+    const notes = read?.structuredContent?.notes ?? [];
+    check(notes.length === 2 && notes[0].text === "Call the printer" && notes[1].time === "08:00" && notes[1].date === later, "it reads the board back, in date order");
+    const flyers = notes[1]?.id;
+    await tool("update_note", { id: flyers, date: today, who: "" });
+    await settle(P.waitForFunction(() => document.querySelectorAll(".item.week").length === 1 && document.querySelectorAll(".item.note .who-tag").length === 1, null, { timeout: 6000 }), "moving a note to today closes next week’s row and drops its tag");
+    const mine = await tool("week_as_text", { who: "Fen" });
+    check(/Call the printer/.test(mine?.content?.[0]?.text ?? "") && !/Flyers/.test(mine.content[0].text), "the week as text, just Fen’s");
+    const cal = await tool("calendar_link", { who: "Fen" });
+    check(cal?.structuredContent?.feed?.includes(`/cal/${init.access.cal}.ics?who=Fen`), "the calendar link, just Fen’s");
+    const pic = await tool("week_picture");
+    if (process.env.BASE_URL) check(pic?.content?.[0]?.type === "image" && pic.content[0].mimeType === "image/png" && pic.content[0].data.length > 20_000, `the week as a picture (${pic?.content?.[0]?.type} ${pic?.content?.[0]?.data?.length ?? pic?.content?.[0]?.text})`);
+    else check(pic?.content?.[0]?.type === "image" || /Browser Rendering|didn’t work/.test(pic?.content?.[0]?.text ?? ""), `the week as a picture, or without Browser Rendering why not and the text (${(pic?.content?.[0]?.text ?? pic?.content?.[0]?.type ?? "").slice(0, 60)})`);
+    await tool("delete_notes", { ids: [flyers] });
+    await settle(P.waitForFunction(() => document.querySelectorAll(".item.note").length === 1, null, { timeout: 6000 }), "and removes a note for everyone");
+    // The address is in Share, folded away.
+    await P.click(".topbar .share");
+    await P.click(".share-ai summary");
+    const shown = await P.$eval(".share-ai input", (e) => e.value);
+    check(shown === mcpUrl(init.access.mcp), "Share shows the MCP address to people who can edit");
+    await P.keyboard.press("Escape");
+    const ro = await rawSession(made.id, { owner: made.owner });
+    await ro.next(["init"]);
+    ro.send({ t: "admin", act: "links" });
+    await ro.next(["done"]);
+    check((await rpc("tools/list")).status === 404, "new links switch the old MCP address off");
+    ro.send({ t: "admin", act: "delete" });
+    await ro.next(["done"]);
+    for (const x of [rs, rv, ro]) x.close();
   }
 
   // One address can't start boards without end (only here: it would use up the quota of a real deployment).

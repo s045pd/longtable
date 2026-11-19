@@ -27,6 +27,9 @@ public, with credit if you'd like it.
   deployment's team password.
 - Reading a board's calendar feed without its calendar link, or with one
   that new links or a new password switched off.
+- Reading or changing a board over MCP without its MCP address, or with one
+  that new links or a new password switched off, or getting the MCP address
+  with a watch link.
 - Anything that leaks a board's keys, a password or a pass to the server's
   logs, another site or another person, or keeps a pasted chat after it has
   been read.

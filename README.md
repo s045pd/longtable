@@ -9,7 +9,7 @@
 A live, shared planning board: everyone writes sticky notes at once and sees each
 other's cursors and typing. Paste the group chat and it becomes notes. **Tidy up**
 files every note into the day it names, and the week shows up in everyone's
-calendar.
+calendar. Your AI assistant can plan on it too, over MCP.
 
 **English** · [简体中文](README.zh-CN.md)
 
@@ -138,6 +138,37 @@ the connection drops are kept and sent when it comes back.
 </tr>
 </table>
 
+## Plan with your AI assistant
+
+Every board is also an [MCP](https://modelcontextprotocol.io) server. Copy
+its address from **Share → Plan with an AI assistant** and add it to your
+assistant:
+
+- **Claude:** Settings → Connectors → Add custom connector, and paste it.
+- **Claude Code:** `claude mcp add --transport http longtable <address>`
+- **ChatGPT, Cursor and others:** add an MCP server by URL (Streamable HTTP).
+
+Then ask in your own words: “put tomorrow's deliveries on the board for Bo”,
+“what's on for me this week?”, “move the tasting to Friday at 3”, “send me
+the week as a picture”. Whatever the assistant changes, everyone on the board
+sees happen live, and the notes fly into their days like a tidy.
+
+| Tool | What it does |
+| --- | --- |
+| `read_board` | Every note with its id, date, time and who it's for, in date order; checklists and headings. Just one person's, if asked. |
+| `week_as_text` | The week as a Markdown checklist. |
+| `week_picture` | The week as a PNG, drawn like **Export → Picture**, for the assistant to show you. |
+| `add_notes` | Up to 40 notes at once, with real dates, times and names, tidied into their days. |
+| `update_note` | Change a note's words, date, time or person; it moves column with its day. |
+| `delete_notes` | Remove notes; the weeks close up. |
+| `tidy_up` | Tidy the whole board. |
+| `calendar_link` | Google, Apple and Outlook subscription links, for everyone or one person. |
+
+The address works like the edit link: anyone with it can change the board,
+so only people who can edit see it, and new links or a new password switch
+it off. Pictures come from Cloudflare Browser Rendering (on the free plan,
+roughly a hundred a day); without it, the assistant gets the week as text.
+
 ## Private by default
 
 <table>
@@ -167,6 +198,7 @@ Whoever starts a board owns it. Under **Share → Board settings** the owner can
 | Passwords | PBKDF2-SHA-256 with 100,000 rounds and a salt for each board. After five wrong tries from one address the board waits 30 seconds, doubling up to 15 minutes. The count is kept in the board's storage for a day, under a hash of the address. |
 | Watch links | The server refuses every change sent with one, not just the page. |
 | Calendar links | A key of their own that can only read the notes that name a day. New links or a new password switch the old one off. |
+| AI assistants (MCP) | A key of their own in the board's MCP address, shown only to people who can edit. It can change the board like the edit link; new links or a new password switch it off. One address can make 600 requests an hour to a board. |
 | Pasted chats | Read by Workers AI on your own account and then dropped: never stored, never logged. A watch link can't send one. |
 | Starting boards | Optional **team password**. Without one, an address can still start only 30 boards an hour. |
 | The pages | Strict Content-Security-Policy, no referrer, no framing, and every page asks not to be indexed. |
@@ -250,8 +282,9 @@ rules: keyless and made-up links, the watch link (also against a script
 talking to the server directly), passwords and the wait after wrong ones,
 guesses sent all at once, new links, clear, delete, the team password, the
 limit on new boards and the security headers. It also pastes a chat, checks
-the calendar feed and its key, and that notes dated next week get a week of
-their own, name tags, *Just mine* and the picture. Against a deployed Longtable the chat goes to
+the calendar feed and its key, that notes dated next week get a week of
+their own, name tags, *Just mine* and the picture, and an MCP client planning
+on a board. Against a deployed Longtable the chat goes to
 real Workers AI. To test a deployed Longtable:
 `BASE_URL=https://… npm run e2e` (add `TEAM_PASSWORD=…` if it has one).
 
@@ -267,13 +300,17 @@ flowchart LR
     gate["Start check<br/>team password, rate limit"]
     room["Board room · Durable Object<br/>SQLite, hibernating WebSockets"]
     ai["Workers AI<br/>reads pasted chats"]
+    br["Browser Rendering<br/>draws the week"]
   end
   cal["Calendar apps"]
+  mcp["AI assistants<br/>Claude, ChatGPT, Cursor…"]
   app -- "start a board" --> worker
   worker --> gate
   app <-- "ops, cursors, reactions" --> room
   room -- "a pasted chat" --> ai
   cal -- "the week as .ics, hourly" --> worker
+  mcp -- "MCP tools" --> room
+  room -- "a picture" --> br
 ```
 
 Every change is an **op**: `put`, `patch`, `del`, `vote` or `meta`. A browser
@@ -292,9 +329,11 @@ src/shared/   the model both sides share: items and ops, the checks every change
               calendar feed, reading a chat (plan.ts), templates
 src/board/    the board in the browser: state and undo (app.ts), items (views.ts), pointer,
               touch and keys (input.ts), typing (editor.ts), cursors (people.ts), bars and
-              dialogs (chrome.ts), the connection (net.ts), the front page's demo (demo.ts)
+              dialogs (chrome.ts), the connection (net.ts), the front page's demo (demo.ts),
+              the week as a picture (picture.ts)
 worker/       the API and static files (index.ts), one board's room with its calendar
-              feed and chat reading (room.ts), keys, passwords and wrong tries (access.ts)
+              feed and chat reading (room.ts), keys, passwords and wrong tries (access.ts),
+              the MCP server (mcp.ts) and its pictures (picture.ts, with picture.html)
 scripts/      npm run setup (deploy-cloudflare.mjs)
 e2e/          the end-to-end run
 ```

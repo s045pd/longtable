@@ -751,6 +751,7 @@ export class Chrome {
         <p class="muted">Only people with a link get in: boards aren’t listed or searchable anywhere, and the key in the link never reaches the server’s logs.</p>
         ${edit ? row("Can edit", edit, "edit", "Anyone with this link can change the board.") : ""}
         ${row("Can watch", view, "view", "Sees it all live and can react, but can’t change anything.")}
+        ${a.mcp ? this.connectAi(`${location.origin}/api/boards/${b.id}/mcp/${a.mcp}`) : ""}
         <div class="share-status ${a.password ? "on" : ""}">${icon(a.password ? "lock" : "unlock")}<span>${
           a.password ? "<b>Password on.</b> Send it separately from the link." : "<b>No password:</b> the link is enough to get in."
         }</span>${a.role === "owner" ? `<button class="linkish" data-act="pw">${a.password ? "Change" : "Add one"}</button>` : ""}</div>
@@ -770,7 +771,7 @@ export class Chrome {
     card.addEventListener("click", async (e) => {
       const t = (e.target as HTMLElement).closest<HTMLButtonElement>("button");
       if (!t) return;
-      if (t.classList.contains("copy")) await this.copy(t.dataset.url!, "Link copied");
+      if (t.classList.contains("copy")) await this.copy(t.dataset.url!, t.dataset.done ?? "Link copied");
       else if (t.classList.contains("sample")) {
         if (b.sampleTeam.active) b.sampleTeam.stop();
         else b.sampleTeam.start();
@@ -782,6 +783,22 @@ export class Chrome {
     });
     redraw();
     this.track(d, redraw);
+  }
+
+  /** The board's MCP address, folded away under the links: for Claude, ChatGPT, Cursor and other assistants. */
+  private connectAi(url: string) {
+    const cli = `claude mcp add --transport http longtable ${url}`;
+    return `
+      <details class="share-ai">
+        <summary>${icon("chat")}<span><b>Plan with an AI assistant</b><small>Claude, ChatGPT, Cursor and others, over MCP</small></span>${icon("right")}</summary>
+        <div class="linkrow"><input readonly value="${escapeHtml(url)}" aria-label="MCP address"/><button class="btn copy" data-url="${escapeHtml(url)}" data-done="MCP address copied: add it to your assistant as a connector">Copy</button></div>
+        <ul class="ai-how">
+          <li><b>Claude</b> Settings → Connectors → Add custom connector, and paste it.</li>
+          <li><b>Claude Code</b> <code>claude mcp add --transport http longtable …</code> <button class="linkish copy" data-url="${escapeHtml(cli)}" data-done="Command copied">Copy the command</button></li>
+          <li><b>ChatGPT, Cursor and the rest</b> Add an MCP server by URL (Streamable HTTP).</li>
+        </ul>
+        <p class="fine">The assistant can read the week, add notes with their dates, times and people, move and remove them, tidy up, hand out the calendar and draw the week as a picture, and everyone here sees it happen. Like the edit link, anyone with this address can change the board; new links or a new password switch it off.</p>
+      </details>`;
   }
 
   /** The share dialog of a board kept in this browser (development, or the demo). */

@@ -11,11 +11,13 @@ import { DurableObject } from "cloudflare:workers";
 import { LIMITS, cleanColor, cleanCoord, cleanEffect, cleanName, cleanOp, cleanPresence, cleanReaction } from "../src/shared/schema";
 import { BoardState } from "../src/shared/state";
 import { TEMPLATES, makeTemplate, type TemplateName } from "../src/shared/templates";
-import type { AdminAct, ClientMessage, DeniedReason, Item, Meta, Op, Person, PlanNote, PlanTrouble, Presence, Role, ServerMessage } from "../src/shared/types";
+import type { AdminAct, ClientMessage, DeniedReason, Effect, Item, Meta, Op, Person, PlanNote, PlanTrouble, Presence, Role, ServerMessage } from "../src/shared/types";
 import { newKey, randomId } from "../src/shared/ids";
 import { FORGET_TRIES_MS, PASSWORD_MAX, PASSWORD_MIN, Tries, accessFor, addressKey, checkPassword, cleanZone, hashPassword, newLock, roleFor, same, sha256, type Lock, type TryRecord, type TryStore } from "./access";
 import { fileStem, toIcs } from "../src/shared/exporter";
 import { PLAN_MAX_CHARS, planMessages, readPlan } from "../src/shared/plan";
+import { handleMcp, mcpResponse, preflight } from "./mcp";
+import { BrowserBusy, drawWeek } from "./picture";
 
 export interface Env {
   BOARDS: DurableObjectNamespace<BoardRoom>;
@@ -26,6 +28,8 @@ export interface Env {
   AI?: { run(model: string, input: unknown): Promise<unknown> };
   /** The Workers AI model for reading chats, if not the default. */
   AI_MODEL?: string;
+  /** Cloudflare Browser Rendering, which draws the week as a picture for AI assistants. Optional. */
+  BROWSER?: Fetcher;
 }
 
 /**
@@ -46,6 +50,13 @@ export const DEFAULT_AI_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8";
 const PLANS_PER_HOUR = 20;
 /** How long the model may take; it thinks first, which for a long chat can be most of a minute. */
 const PLAN_TIMEOUT_MS = 100_000;
+/** MCP requests one address may make to one board in an hour. */
+const MCP_PER_HOUR = 600;
+/**
+ * Pictures one board may have drawn in an hour. Each takes a few seconds of
+ * Browser Rendering, whose free plan gives 10 minutes a day.
+ */
+const PICTURES_PER_HOUR = 20;
 
 interface Attachment {
   pid: string;
@@ -235,7 +246,7 @@ export class BoardRoom extends DurableObject<Env> {
    * Count one more of something an address may do `limit` times an hour.
    * Returns 0 and counts it when it is allowed, or the seconds to wait.
    */
-  private count(table: "started" | "plans", who: string, limit: number): number {
+  private count(table: "started" | "plans" | "mcp" | "pictures", who: string, limit: number): number {
     const sql = this.ctx.storage.sql;
     const now = Date.now();
     sql.exec(`CREATE TABLE IF NOT EXISTS ${table} (who TEXT PRIMARY KEY, n INTEGER NOT NULL, since INTEGER NOT NULL)`);
@@ -251,6 +262,8 @@ export class BoardRoom extends DurableObject<Env> {
     if (url.pathname.endsWith("/snapshot")) return this.snapshot(request);
     const cal = /^\/api\/boards\/([a-z0-9]+)\/cal\/([a-z0-9]+)\.ics$/.exec(url.pathname);
     if (cal) return this.calendar(cal[1], cal[2], url.searchParams.get("tz"), url.searchParams.get("who"));
+    const mcp = /^\/api\/boards\/([a-z0-9]+)\/mcp\/([a-z0-9]+)$/.exec(url.pathname);
+    if (mcp) return this.mcp(request, mcp[1], mcp[2]);
     if (request.headers.get("Upgrade") !== "websocket") return new Response("Expected a WebSocket", { status: 426 });
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
@@ -288,6 +301,65 @@ export class BoardRoom extends DurableObject<Env> {
     return new Response(toIcs(meta, this.state.list(), boardId, new Date(), { tz: cleanZone(tz) }, { who: person }), {
       headers: { ...headers, "content-type": "text/calendar; charset=utf-8", "content-disposition": `inline; filename="${fileStem(meta)}.ics"` },
     });
+  }
+
+  /**
+   * The board as an MCP server for AI assistants (worker/mcp.ts). Its own key,
+   * in the address like the calendar's, lets an assistant read and change the
+   * board; new links or a new password give the board a new one.
+   */
+  private async mcp(request: Request, boardId: string, key: string): Promise<Response> {
+    if (request.method === "OPTIONS") return preflight();
+    if (this.deletedAt) return mcpResponse({ jsonrpc: "2.0", id: null, error: { code: -32001, message: "This board was deleted." } }, 410);
+    if (!this.seeded || !this.lock?.mcp || !same(key, this.lock.mcp)) return mcpResponse({ jsonrpc: "2.0", id: null, error: { code: -32001, message: "No such board, or the link was changed." } }, 404);
+    const ip = await addressKey(request.headers.get("CF-Connecting-IP"));
+    const wait = this.count("mcp", ip, MCP_PER_HOUR);
+    if (wait) return new Response(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32002, message: `Too many requests; try again in ${wait} s.` } }), { status: 429, headers: { "content-type": "application/json", "retry-after": String(wait), "access-control-allow-origin": "*" } });
+    const origin = new URL(request.url).origin;
+    return handleMcp(request, {
+      id: boardId,
+      origin,
+      cal: this.lock.cal ?? "",
+      meta: () => this.state.meta,
+      items: () => this.state.list(),
+      commit: (ops, fx) => this.commitAs(ops, fx),
+      picture: (who) => this.picture(origin, who),
+    });
+  }
+
+  /** Changes made from outside a socket (an AI over MCP): checked like anyone's, sent to everyone, written now. */
+  private commitAs(ops: Op[], fx?: Effect): Op[] {
+    const applied: Op[] = [];
+    for (const raw of ops) {
+      const op = cleanOp(raw, this.state.typeOf);
+      if (!op) continue;
+      if (op.op === "put" && !this.state.items.has(op.item.id) && this.state.items.size >= LIMITS.items) continue;
+      if (!this.state.apply(op)) continue;
+      applied.push(op);
+      this.later(op.op === "meta" ? null : op.op === "put" ? op.item.id : op.id);
+    }
+    if (applied.length) {
+      const effect = cleanEffect(fx);
+      this.broadcast({ t: "ops", from: "mcp", ops: applied, ...(effect ? { fx: effect } : {}) });
+      this.flush();
+    }
+    return applied;
+  }
+
+  /** The week as a PNG, drawn by a headless browser on the site's own picture page. */
+  private async picture(origin: string, who: string): Promise<{ ok: true; png: string } | { ok: false; why: "off" | "busy" | "failed"; wait?: number }> {
+    if (!this.env.BROWSER) return { ok: false, why: "off" };
+    const wait = this.count("pictures", "board", PICTURES_PER_HOUR);
+    if (wait) return { ok: false, why: "busy", wait };
+    try {
+      const png = await drawWeek(this.env.BROWSER, origin, { meta: this.state.meta, items: this.state.list(), who, today: new Date().toISOString().slice(0, 10) });
+      return { ok: true, png };
+    } catch (e) {
+      if (e instanceof BrowserBusy) return { ok: false, why: "busy", wait: e.wait };
+      const message = String((e as Error)?.message ?? e);
+      console.warn("picture: Browser Rendering failed:", message.slice(0, 300));
+      return { ok: false, why: /429|rate limit|too many|quota|exceeded/i.test(message) ? "busy" : "failed" };
+    }
   }
 
   private send(ws: WebSocket, msg: ServerMessage) {
@@ -477,9 +549,10 @@ export class BoardRoom extends DurableObject<Env> {
     }
     const role = handOver ? "owner" : await roleFor(this.lock, msg.key, msg.owner);
     if (!role) return this.deny(ws, "link");
-    // A board from before calendar feeds gets its feed key now.
-    if (!this.lock.cal) {
-      this.lock.cal = newKey();
+    // A board from before calendar feeds or MCP gets their keys now.
+    if (!this.lock.cal || !this.lock.mcp) {
+      this.lock.cal ??= newKey();
+      this.lock.mcp ??= newKey();
       this.saveLock();
     }
     // A rename may have come in while the keys were checked.
@@ -576,8 +649,9 @@ export class BoardRoom extends DurableObject<Env> {
         }
         this.lock.pw = await hashPassword(pw);
         this.lock.pass = newKey();
-        // Calendars subscribed before the new password stop getting the week.
+        // Calendars subscribed and assistants connected before the new password stop getting the week.
         this.lock.cal = newKey();
+        this.lock.mcp = newKey();
         this.saveLock();
         // Everyone but the owners has to give the new password.
         for (const s of others()) {
@@ -596,6 +670,7 @@ export class BoardRoom extends DurableObject<Env> {
       this.lock.edit = newKey();
       this.lock.view = newKey();
       this.lock.cal = newKey();
+      this.lock.mcp = newKey();
       this.saveLock();
       for (const s of others()) this.deny(s, "link");
       this.tellAccess();
