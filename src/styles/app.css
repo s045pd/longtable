@@ -302,8 +302,8 @@ svg {
   border: 0;
   border-radius: 7px;
   background: transparent;
-  font: 600 10px/1 var(--mono);
-  letter-spacing: 0.08em;
+  font: 600 11px/1 var(--mono);
+  letter-spacing: 0.06em;
   color: rgba(27, 27, 31, 0.55);
   white-space: nowrap;
   opacity: 0;
@@ -606,8 +606,8 @@ svg {
 .day-head b {
   position: absolute;
   right: 4px;
-  top: 12px;
-  font: 500 13px/1 var(--mono);
+  top: 10px;
+  font: 500 15px/1 var(--mono);
   letter-spacing: 0.06em;
   color: var(--muted);
   white-space: nowrap;
