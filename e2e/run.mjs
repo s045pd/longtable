@@ -5,7 +5,9 @@
 // What it checks: cursors and names reach the other person; a note typed by
 // one appears for the other; a drag lands in the same place for both; Tidy up
 // lays the notes out in day columns for everyone; undo takes it back; the
-// board survives a reload; the phone layout loads; no page errors anywhere.
+// board survives a reload; a day picked by hand, or by dragging a note into
+// a column, reaches the other person and decides the tidy and the export;
+// the phone layout loads; no page errors anywhere.
 import { spawn } from "node:child_process";
 import { chromium, devices } from "playwright";
 
@@ -132,6 +134,54 @@ try {
   await A.click(".topbar .export");
   const md = await A.$eval(".preview", (e) => e.textContent);
   check(md.includes("15:00 Soft opening Tue 3 pm"), "the export lists the new note at 15:00 on Tuesday");
+
+  // Ana picks a day by hand; Eli sees it, and his tidy follows it.
+  const noteOf = (page, words) => page.$$eval(".item.note", (els, w) => els.find((e) => e.textContent.includes(w))?.dataset.id, words);
+  await A.keyboard.press("Escape");
+  await wait(300);
+  await A.keyboard.press("Escape");
+  const band = await noteOf(A, "Brass band");
+  const bandBox = await A.locator(`.item[data-id="${band}"] .shape`).boundingBox();
+  await A.mouse.click(bandBox.x + bandBox.width / 2, bandBox.y + bandBox.height / 2);
+  await A.click(".selbar [data-act='day']");
+  await A.click(".when-menu [data-day='1']");
+  await B.waitForFunction((id) => document.querySelector(`.item[data-id="${id}"] .day-tag.picked`)?.textContent.startsWith("TUE"), band, { timeout: 5000 }).then(
+    () => check(true, "a day Ana picks by hand shows on the note for Eli"),
+    () => check(false, "a day Ana picks by hand shows on the note for Eli"),
+  );
+  await A.keyboard.press("Escape");
+  await A.keyboard.press("Escape");
+  await B.keyboard.press("Escape");
+  await B.click(".tidy-pill");
+  await A.waitForSelector(".item.week", { state: "attached", timeout: 5000 });
+  await wait(1800);
+  const colOf = (page, id) =>
+    page.evaluate((id) => {
+      const x = (el) => Number(/translate\(([-\d.]+)px/.exec(el.style.transform)[1]);
+      return Math.round((x(document.querySelector(`.item[data-id="${id}"]`)) - x(document.querySelector(".item.week"))) / 232);
+    }, id);
+  check((await colOf(A, band)) === 1, "the tidy files “Brass band Sat” under Tuesday, the day picked for it");
+
+  // Ana drags a note into Sunday's column: it becomes a Sunday note for both.
+  await A.keyboard.press("!");
+  await wait(900);
+  const balloons = await noteOf(A, "Balloons");
+  const from = await A.locator(`.item[data-id="${balloons}"] .shape`).boundingBox();
+  const sun = await A.locator(".day-head[data-col='6']").boundingBox();
+  await A.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await A.mouse.down();
+  await A.mouse.move(sun.x + sun.width / 2, sun.y + sun.height + from.height * 0.7, { steps: 10 });
+  await A.mouse.up();
+  await B.waitForFunction((id) => document.querySelector(`.item[data-id="${id}"] .day-tag`)?.textContent.startsWith("SUN"), balloons, { timeout: 5000 }).then(
+    () => check(true, "a note dragged into Sunday's column becomes a Sunday note for Eli too"),
+    () => check(false, "a note dragged into Sunday's column becomes a Sunday note for Eli too"),
+  );
+  await wait(900);
+  check((await colOf(A, balloons)) === 6 && (await colOf(B, balloons)) === 6, "it slots into the Sunday column on both screens");
+  await A.click(".topbar .export");
+  const md2 = await A.$eval(".preview", (e) => e.textContent);
+  check(/## Tuesday[^#]*Brass band/.test(md2) && /## Sunday[^#]*Balloons up Fri/.test(md2), "the export follows the picked days");
+  await A.keyboard.press("Escape");
 
   // A phone.
   const P = await person(browser, "Dee", "#FFE38A", { ...devices["iPhone 13"] });

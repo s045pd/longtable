@@ -1,8 +1,8 @@
 // The week, out of the board: as text (Markdown), as a spreadsheet (CSV) and
-// as a calendar (iCalendar). Notes are grouped by the day they name and
-// ordered like the tidy orders them; notes that name a time become timed
-// events, the rest all-day ones.
-import { DAY_NAMES, dateOf, findDay, findTime, formatTime } from "./days";
+// as a calendar (iCalendar). Notes are grouped by their day (picked by hand,
+// or else the one their words name) and ordered like the tidy orders them;
+// notes with a time become timed events, the rest all-day ones.
+import { DAY_NAMES, dateOf, formatTime, noteDay, noteTime } from "./days";
 import type { CheckItem, Item, Meta, NoteItem } from "./types";
 
 export interface WeekEntry {
@@ -22,8 +22,8 @@ export function weekEntries(items: Item[]): WeekEntry[] {
   const notes = items.filter((it): it is NoteItem => it.type === "note" && it.text.trim() !== "");
   const entries = notes.map((n) => ({
     id: n.id,
-    day: findDay(n.text)?.day ?? null,
-    time: findTime(n.text),
+    day: noteDay(n),
+    time: noteTime(n),
     text: oneLine(n.text),
     by: n.by ?? "",
     votes: Object.keys(n.votes ?? {}).length,

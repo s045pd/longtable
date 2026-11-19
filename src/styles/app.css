@@ -296,18 +296,39 @@ svg {
 }
 .note .day-tag {
   position: absolute;
-  right: 10px;
-  top: 8px;
+  right: 6px;
+  top: 5px;
+  padding: 5px 7px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
   font: 600 10px/1 var(--mono);
   letter-spacing: 0.08em;
   color: rgba(27, 27, 31, 0.55);
+  white-space: nowrap;
   opacity: 0;
-  transition: opacity 0.15s;
+  transition: opacity 0.15s, background 0.12s;
   pointer-events: none;
 }
 .board-app[data-tool="select"] .note:hover .day-tag,
 .note.flying .day-tag {
   opacity: 1;
+}
+.board-app[data-tool="select"] .note:hover .day-tag,
+.board-app[data-tool="select"] .note .day-tag.picked {
+  pointer-events: auto;
+  cursor: pointer;
+}
+.note .day-tag:hover {
+  background: rgba(27, 27, 31, 0.1);
+  color: var(--ink);
+}
+/* A day picked by hand stays on show, as a stamp. */
+.note .day-tag.picked {
+  opacity: 1;
+  color: var(--ink);
+  background: rgba(27, 27, 31, 0.1);
+  box-shadow: inset 0 0 0 1.5px rgba(27, 27, 31, 0.5);
 }
 .note.editing .words,
 .note.editing .day-tag {
@@ -581,6 +602,18 @@ svg {
   letter-spacing: 4px;
   color: var(--chalk);
   white-space: nowrap;
+}
+.day-head b {
+  position: absolute;
+  right: 4px;
+  top: 12px;
+  font: 500 13px/1 var(--mono);
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.day-head.typing b {
+  animation: type 0.24s steps(4, end) calc(var(--at) + 0.08s) both;
 }
 .day-head i {
   position: absolute;
@@ -890,6 +923,116 @@ svg {
   width: 24px;
   height: 24px;
   stroke: none;
+}
+
+.when-menu {
+  width: 320px;
+  gap: 10px;
+  padding: 12px;
+}
+.when-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.when-top > b {
+  font: 600 15px var(--display);
+}
+.when-week {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.when-menu input {
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--bar-line);
+  border-radius: 8px;
+  background: var(--raise);
+  color: var(--chalk);
+  font: 500 13px var(--sans);
+  color-scheme: dark;
+}
+.when-days {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.menu .when-days button {
+  height: 52px;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  padding: 0;
+  border: 1.5px solid var(--bar-line);
+  border-radius: 10px;
+}
+.when-days button b {
+  font: 600 11px/1 var(--mono);
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.when-days button small {
+  font: 600 17px/1 var(--sans);
+}
+.menu .when-days button.on {
+  background: var(--chalk);
+  border-color: var(--chalk);
+  color: var(--ink);
+}
+.when-days button.on b {
+  color: rgba(27, 27, 31, 0.6);
+}
+/* Read from the words rather than picked: shown, but not stamped. */
+.menu .when-days button.on.auto {
+  background: transparent;
+  border: 1.5px dashed var(--chalk);
+  color: var(--chalk);
+}
+.when-days button.on.auto b {
+  color: var(--muted);
+}
+.when-time {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.when-time label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.menu .when-time button,
+.menu .when-foot button {
+  height: 30px;
+  font-size: 13px;
+  border: 1px solid var(--bar-line);
+}
+.menu .when-time button.on {
+  background: var(--chalk);
+  color: var(--ink);
+}
+.when-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.when-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.menu .when-foot button.done {
+  background: var(--chalk);
+  color: var(--ink);
+  border-color: var(--chalk);
+  font-weight: 600;
 }
 
 .toolbar {
@@ -1510,8 +1653,13 @@ svg {
     display: none;
   }
   .selbar > button[data-act="vote"] span,
+  .selbar > button[data-act="day"] span,
   .selbar > button[data-act="tidy"] span {
     display: inline;
+  }
+  .when-menu {
+    width: calc(100vw - 16px);
+    max-width: 360px;
   }
   .status,
   .follow-frame span {

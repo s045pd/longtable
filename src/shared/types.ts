@@ -19,6 +19,10 @@ export interface NoteItem extends BaseItem {
   color: string;
   /** Voting dots: voter id → that voter's colour. */
   votes?: Record<string, string>;
+  /** A day picked by hand: 0 = Monday … 6 = Sunday, 7 = any day; -1 or absent = read from the words. */
+  day?: number;
+  /** A time picked by hand, in minutes after midnight; -2 = no time; -1 or absent = read from the words. */
+  time?: number;
 }
 
 /** Big chalk words typed straight onto the canvas: a section heading. */

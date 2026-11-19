@@ -4,7 +4,8 @@
 // order. Anything else that was tidied (photos, checklists, labels, pen
 // strokes) lines up in a row under the week. A board that already has a week
 // keeps it: the notes already in it are sorted again together with the new.
-import { findDay, findTime } from "./days";
+// A day or time picked by hand on a note wins over the words on it.
+import { ANY, noteDay, noteTime } from "./days";
 import { NOTE, PITCH_X, PITCH_Y, HEADER_GAP, bounds, union, type Box } from "./geometry";
 import type { Effect, Item, NoteItem, Op, WeekItem } from "./types";
 
@@ -52,12 +53,12 @@ export function planTidy(board: Item[], targetIds: string[] | null, newId: () =>
 
   // Columns: Monday … Sunday, then ANY DAY.
   const columns: NoteItem[][] = Array.from({ length: 8 }, () => []);
-  for (const n of notes) columns[findDay(n.text)?.day ?? 7].push(n);
+  for (const n of notes) columns[noteDay(n) ?? 7].push(n);
   const cols = columns[7].length ? 8 : 7;
   for (const column of columns) {
     column.sort((a, b) => {
-      const ta = findTime(a.text);
-      const tb = findTime(b.text);
+      const ta = noteTime(a);
+      const tb = noteTime(b);
       if (ta === null && tb === null) return readingOrder(a, b);
       if (ta === null) return -1;
       if (tb === null) return 1;
@@ -137,4 +138,56 @@ export function planTidy(board: Item[], targetIds: string[] | null, newId: () =>
   const moved = [weekId, ...notes.map((n) => n.id), ...others.map((o) => o.id)];
   const box = union(moved.map((id) => bounds(after.get(id)!)))!;
   return { ops, fx: { kind: "tidy", delays, week: weekId, count: notes.length }, box, count: notes.length };
+}
+
+/** How many rows the week's fullest column has. */
+function weekRows(week: WeekItem, notes: NoteItem[]): number {
+  const counts = new Map<number, number>();
+  for (const n of notesInWeek(week, notes)) {
+    const col = Math.round((n.x - week.x) / PITCH_X);
+    counts.set(col, (counts.get(col) ?? 0) + 1);
+  }
+  return Math.max(0, ...counts.values());
+}
+
+/** The column of a week that a point is over (headers included, plus a row's room below), or null. */
+export function columnAt(week: WeekItem, rows: number, x: number, y: number): number | null {
+  const col = Math.round((x - week.x) / PITCH_X);
+  if (col < 0 || col >= week.cols) return null;
+  const top = week.y - PITCH_Y / 2 - HEADER_GAP;
+  const bottom = week.y + Math.max(1, rows) * PITCH_Y + PITCH_Y / 2;
+  return y >= top && y <= bottom ? col : null;
+}
+
+/**
+ * Notes let go of after a drag. Each one that lands in a column of the week
+ * takes that column's day (picked by hand from then on), and the week sorts
+ * itself again so they slot in and the gaps they left close up. `leaving`
+ * are the notes that sat in the week when the drag began.
+ */
+export function planDrop(board: Item[], dropped: string[], leaving: string[], newId: () => string): Op[] {
+  const week = board.find((it): it is WeekItem => it.type === "week");
+  if (!week) return [];
+  const moving = new Set(dropped);
+  const notes = board.filter((it): it is NoteItem => it.type === "note");
+  const rows = weekRows(week, notes.filter((n) => !moving.has(n.id)));
+  const ops: Op[] = [];
+  const landed: string[] = [];
+  const after = new Map(board.map((it) => [it.id, it]));
+  for (const id of dropped) {
+    const n = after.get(id);
+    if (!n || n.type !== "note") continue;
+    const col = columnAt(week, rows, n.x, n.y);
+    if (col === null) continue;
+    landed.push(id);
+    const want = col >= 7 ? null : col;
+    if (noteDay(n) !== want) {
+      const set = { day: want === null ? ANY : want };
+      ops.push({ op: "patch", id, set });
+      after.set(id, { ...n, ...set });
+    }
+  }
+  if (!landed.length && !leaving.some((id) => moving.has(id))) return [];
+  const plan = planTidy([...after.values()], landed, newId);
+  return plan ? [...ops, ...plan.ops] : ops;
 }

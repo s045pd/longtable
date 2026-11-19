@@ -2,7 +2,7 @@
 // moved and tilted with one transform; its shape hangs off that point. Items
 // move instantly for your own changes, glide for other people's, and spring
 // in a wave when someone tidies.
-import { ANY_DAY, DAY_HEADERS, findDay } from "../shared/days";
+import { ANY_DAY, DAY_HEADERS, dateOf, dayPicked, findDay, noteDay, timePicked, whenLabel } from "../shared/days";
 import { CHECK, HEADER_GAP, LABEL_SIZE, NOTE, PHOTO, PITCH_X, bounds, checkHeight } from "../shared/geometry";
 import { tones } from "../shared/colors";
 import type { CheckItem, Item, LabelItem, NoteItem, PhotoItem, StrokeItem, WeekItem } from "../shared/types";
@@ -26,6 +26,10 @@ export const SPRING = (() => {
   const linear = `linear(${pts.join(", ")})`;
   return typeof CSS !== "undefined" && CSS.supports?.("transition-timing-function", linear) ? linear : "cubic-bezier(.3,1.45,.55,1)";
 })();
+
+/** The board's week (its Monday), so notes and the week can show real dates. */
+let weekOf = "";
+export const setWeekOf = (iso: string) => (weekOf = iso);
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
@@ -57,7 +61,9 @@ export function strokePath(pts: number[], dx = 0, dy = 0): string {
 
 function noteWords(it: NoteItem): string {
   const fit = fitNote(it.text);
-  const day = findDay(it.text);
+  // Underline the day word only while it is what decides the day.
+  const named = findDay(it.text);
+  const day = named && named.day === noteDay(it) ? named : null;
   let marked = false;
   const lines = fit.lines.map((line) => {
     if (!marked && day) {
@@ -156,13 +162,13 @@ export class ItemView {
   private paintNote(it: NoteItem) {
     const t = tones(it.color);
     const curl = hash(it.id) % 4 === 0;
-    const day = findDay(it.text);
+    const picked = dayPicked(it) || timePicked(it);
     this.shape.style.cssText = `width:${NOTE}px;height:${NOTE}px;left:${-NOTE / 2}px;top:${-NOTE / 2}px;--c:${t.base};--c-light:${t.light};--c-dark:${t.dark}`;
     this.shape.innerHTML =
       `<div class="shadow"></div><div class="paper${curl ? " curl" : ""}"></div>${curl ? '<div class="fold"></div>' : ""}` +
       noteWords(it) +
       voteDots(it) +
-      `<span class="day-tag">${day ? DAY_HEADERS[day.day] : ANY_DAY}</span>`;
+      `<button class="day-tag${picked ? " picked" : ""}" title="Pick the day · D" aria-label="Day: ${esc(whenLabel(it, weekOf))}. Pick the day">${esc(whenLabel(it, weekOf))}</button>`;
     this.shape.title = it.by ? `${it.by}` : "";
   }
 
@@ -207,8 +213,13 @@ export class ItemView {
     const w = (it.cols - 1) * PITCH_X + NOTE;
     this.shape.style.cssText = `left:${-NOTE / 2}px;top:${-HEADER_GAP - 34}px;width:${w}px;height:56px`;
     const heads = [...DAY_HEADERS, ANY_DAY].slice(0, it.cols);
+    const date = (i: number) => {
+      if (!weekOf || i > 6) return "";
+      const d = dateOf(weekOf, i);
+      return `<b>${d.getDate()} ${d.toLocaleString("en-GB", { month: "short" }).toUpperCase()}</b>`;
+    };
     this.shape.innerHTML = heads
-      .map((h, i) => `<div class="day-head" data-col="${i}" style="left:${i * PITCH_X}px"><span>${h}</span><i></i></div>`)
+      .map((h, i) => `<div class="day-head" data-col="${i}" style="left:${i * PITCH_X}px"><span>${h}</span>${date(i)}<i></i></div>`)
       .join("");
   }
 

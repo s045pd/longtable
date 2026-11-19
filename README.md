@@ -28,6 +28,11 @@ five fictional people.
   without a time first, then by time. Notes that name no day get an ANY DAY
   column. Everything else lines up under the week. A second tidy keeps the
   week and sorts new notes into it. One undo takes it all back.
+- **Pick the day by hand.** Select notes and press **Day** (or `D`, or click
+  the date on a note) to pick a day of the board's week, with its real date,
+  and a time. Or drag a note into a column of the week: it takes that day and
+  slots in. A picked day wins over the words and shows as a stamp on the note;
+  "Read from the words again" undoes the pick.
 - **Follow someone.** Click a face in the top bar and your view follows theirs.
 - **Export the week.** Copy it as Markdown for a chat, or download a CSV or an
   `.ics` calendar with timed and all-day events.

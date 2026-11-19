@@ -3,7 +3,7 @@
 // remembered for undo, and sent to the room, which passes it on to everyone
 // else. Their changes arrive as ops too and are applied the same way.
 import { PALETTE, freeColor } from "../shared/colors";
-import { findDay } from "../shared/days";
+import { DAY_NAMES, dateOf, noteDay } from "../shared/days";
 import { bounds, setLabelMeasure, union, type Box } from "../shared/geometry";
 import { randomId } from "../shared/ids";
 import { BoardState } from "../shared/state";
@@ -18,7 +18,7 @@ import { loadIdentity, rememberBoard, saveIdentity, deviceId, type Identity } fr
 import { attachInput } from "./input";
 import { LiveLink, LocalLink, type InitData, type Link, type LinkStatus } from "./net";
 import { People } from "./people";
-import { ItemView, type Motion } from "./views";
+import { ItemView, setWeekOf, type Motion } from "./views";
 import { Editor } from "./editor";
 import { SampleTeam } from "./sample-team";
 
@@ -99,6 +99,7 @@ export class Board {
   private build() {
     this.root.innerHTML = "";
     this.root.className = "board-app";
+    this.root.dataset.tool = this.tool;
     this.stage = el("div", "stage");
     const canvas = el("canvas", "grid") as unknown as HTMLCanvasElement;
     this.world = el("div", "world");
@@ -136,6 +137,7 @@ export class Board {
     this.me.pid = d.you;
     this.state = new BoardState(d.meta, d.items);
     for (const op of pending) this.state.apply(op);
+    setWeekOf(this.state.meta.weekOf);
     for (const v of this.views.values()) v.remove();
     this.views.clear();
     for (const it of this.state.items.values()) this.mount(it, false);
@@ -194,6 +196,11 @@ export class Board {
   /** Bring the DOM in line with one applied op. */
   private reflect(op: Op, motion: (id: string) => Motion, remote: boolean) {
     if (op.op === "meta") {
+      if (op.set.weekOf !== undefined) {
+        // New dates: the notes' day tags and the week's headers show them.
+        setWeekOf(this.state.meta.weekOf);
+        for (const v of this.views.values()) if (v.item.type === "note" || v.item.type === "week") v.paint();
+      }
       this.chrome.onMeta();
       return;
     }
@@ -412,6 +419,37 @@ export class Board {
     this.commit([{ op: "patch", id, set: { rows } }]);
   }
 
+  /**
+   * Pick the day and/or time of the selected notes by hand. Notes already in
+   * the week move to their new column, in the same undo step.
+   */
+  setWhen(set: { day?: number; time?: number }) {
+    this.editor.commit();
+    const notes = this.selected().filter((it): it is NoteItem => it.type === "note");
+    if (!notes.length) return;
+    const ops: Op[] = notes.map((n) => ({ op: "patch", id: n.id, set }) as Op);
+    const week = this.state.list().find((it) => it.type === "week");
+    const inWeek = week ? new Set(this.weekNotes(week.id)) : new Set<string>();
+    const moving = notes.filter((n) => inWeek.has(n.id)).map((n) => n.id);
+    const back = this.commit(ops, { history: false });
+    const plan = moving.length ? planTidy(this.state.list(), moving, () => this.newItemId()) : null;
+    const back2 = plan ? this.commit(plan.ops, { history: false, motion: () => ({ kind: "spring", delay: 0 }) }) : [];
+    this.remember([...back2, ...back], [...ops, ...(plan?.ops ?? [])]);
+    this.chrome.onSelection();
+  }
+
+  /** After a drop into the week: say which day a note now belongs to. */
+  announceDays(ops: Op[]) {
+    const picked = ops.filter((op): op is Extract<Op, { op: "patch" }> => op.op === "patch" && "day" in op.set);
+    if (!picked.length) return;
+    const n = this.state.items.get(picked[0].id);
+    if (!n || n.type !== "note") return;
+    const day = noteDay(n);
+    const weekOf = this.state.meta.weekOf;
+    const when = day === null ? "any day" : weekOf ? `${DAY_NAMES[day]} ${dateOf(weekOf, day).getDate()} ${dateOf(weekOf, day).toLocaleString("en-GB", { month: "short" })}` : DAY_NAMES[day];
+    this.chrome.toast(picked.length === 1 ? `Now on ${when}` : `${picked.length} notes moved to new days`);
+  }
+
   setMeta(set: { client?: string; file?: string; weekOf?: string }) {
     this.commit([{ op: "meta", set }]);
   }
@@ -447,7 +485,7 @@ export class Board {
     week?.typeHeaders((col) => waveDelay(col, 0) + FLIGHT * 0.46);
     for (const [id, delay] of Object.entries(fx.delays)) {
       const v = this.views.get(id);
-      if (v?.item.type === "note" && findDay(v.item.text)) v.markDay(delay + FLIGHT * 0.6);
+      if (v?.item.type === "note") v.markDay(delay + FLIGHT * 0.6);
     }
     const last = Math.max(0, ...Object.values(fx.delays));
     this.chrome.sorted(this.state.meta.file, fx.count, (last + FLIGHT) * 1000, mine);

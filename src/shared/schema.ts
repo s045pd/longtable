@@ -28,6 +28,8 @@ const num = (v: unknown, lo: number, hi: number): number | undefined =>
 const coord = (v: unknown) => num(v, -LIMITS.coordinate, LIMITS.coordinate);
 const str = (v: unknown, max: number): string | undefined =>
   typeof v === "string" ? v.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "").slice(0, max) : undefined;
+const int = (v: unknown, lo: number, hi: number): number | undefined =>
+  typeof v === "number" && Number.isInteger(v) && v >= lo && v <= hi ? v : undefined;
 const color = (v: unknown): string | undefined => (typeof v === "string" && HEX.test(v) ? v.toUpperCase() : undefined);
 export const isId = (v: unknown): v is string => typeof v === "string" && ID.test(v);
 
@@ -65,7 +67,7 @@ function votes(v: unknown): Record<string, string> | undefined {
  * any of them except id and type; a put must give the required ones.
  */
 const FIELDS: Record<Item["type"], Record<string, (v: unknown) => unknown>> = {
-  note: { text: (v) => str(v, LIMITS.text), color, votes },
+  note: { text: (v) => str(v, LIMITS.text), color, votes, day: (v) => int(v, -1, 7), time: (v) => int(v, -2, 1439) },
   label: { text: (v) => str(v, LIMITS.label), color },
   check: { title: (v) => str(v, LIMITS.row), rows, color },
   photo: { art: (v) => (PHOTO_ARTS.includes(v as PhotoArt) ? v : undefined), caption: (v) => str(v, LIMITS.row) },

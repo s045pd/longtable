@@ -2,6 +2,9 @@
 // hold one and apply the same changes to it in the same way.
 import type { Item, Meta, Op } from "./types";
 
+/** What a patch sets to undo a field that was not there before. */
+const UNSET: Record<string, unknown> = { day: -1, time: -1 };
+
 export class BoardState {
   items = new Map<string, Item>();
   meta: Meta;
@@ -53,7 +56,9 @@ export class BoardState {
         const before = this.items.get(op.id) as Record<string, unknown> | undefined;
         if (!before) return [];
         const set: Record<string, unknown> = {};
-        for (const key of Object.keys(op.set)) set[key] = before[key];
+        // A field the item did not have goes back to its "unset" value, since a
+        // patch cannot remove a field.
+        for (const key of Object.keys(op.set)) set[key] = before[key] ?? UNSET[key];
         return [{ op: "patch", id: op.id, set: set as Partial<Item> }];
       }
       case "del": {

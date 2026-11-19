@@ -2,10 +2,10 @@
 // bar (whose board, who is here, share, export, zoom), the toolbar, the
 // selection bar, the Tidy up button, toasts and the few dialogs.
 import { PALETTE } from "../shared/colors";
-import { nextMonday } from "../shared/days";
+import { ANY, DAY_HEADERS, DAY_NAMES, FROM_WORDS, NO_TIME, dateOf, dayPicked, findDay, formatTime, mondayOf, nextMonday, noteDay, noteTime, timePicked } from "../shared/days";
 import { fileStem, toCsv, toIcs, toMarkdown } from "../shared/exporter";
 import { REACTIONS } from "../shared/schema";
-import type { ReactionKind } from "../shared/types";
+import type { NoteItem, ReactionKind } from "../shared/types";
 import { escapeHtml, type Board, type Tool } from "./app";
 import type { LinkStatus } from "./net";
 import { reactionIcon } from "./people";
@@ -29,6 +29,7 @@ const ICON = {
   close: '<path d="M6 6l12 12M18 6L6 18" fill="none"/>',
   fit: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none"/>',
   plus: '<path d="M12 5v14M5 12h14" fill="none"/>',
+  day: '<rect x="4" y="5" width="16" height="15" rx="2" fill="none"/><path d="M4 10h16M9 3v4M15 3v4" fill="none"/><rect x="13" y="13" width="4" height="4" rx="0.5"/>',
   minus: '<path d="M5 12h14" fill="none"/>',
 };
 const icon = (name: keyof typeof ICON) => `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">${ICON[name]}</svg>`;
@@ -64,6 +65,7 @@ export class Chrome {
   private sortedEl: HTMLElement;
   private reactMenu: HTMLElement;
   private zoomMenu: HTMLElement;
+  private whenMenu: HTMLElement;
 
   constructor(private board: Board) {
     const root = board.root;
@@ -100,12 +102,13 @@ export class Chrome {
       </nav>
       <div class="menu react-menu" role="menu">${REACTIONS.map((k) => `<button data-react="${k}" aria-label="${k}">${reactionIcon(k, "#ECE9E2")}</button>`).join("")}</div>
       <div class="selbar" role="toolbar" aria-label="Selection"></div>
+      <div class="menu when-menu" role="dialog" aria-label="Pick the day"></div>
       <button class="tidy-pill" aria-label="Tidy up"><span class="grid-icon"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="pill-text"><b>Tidy up</b><small></small></span></button>
       <div class="status" aria-live="polite"></div>
       <div class="toasts" aria-live="polite"></div>
       <div class="empty-hint">
         <p class="big">Double-click anywhere to add a note.</p>
-        <p>Name a day on it — Mon, Tue… or 周一 — and <b>Tidy up</b> files it into that day.</p>
+        <p>Name a day on it — Mon, Tue… or 周一 — or pick one, and <b>Tidy up</b> files it into that day.</p>
       </div>
       <div class="follow-frame"><span></span></div>
       <div class="sorted" aria-live="polite"></div>
@@ -125,6 +128,7 @@ export class Chrome {
     this.sortedEl = $(".sorted");
     this.reactMenu = $(".react-menu");
     this.zoomMenu = $(".zoom-menu");
+    this.whenMenu = $(".when-menu");
 
     // Names in the top bar are edited in place.
     for (const key of ["client", "file"] as const) {
@@ -175,7 +179,40 @@ export class Chrome {
       this.closeMenus();
     });
     document.addEventListener("pointerdown", (e) => {
-      if (!(e.target as HTMLElement).closest(".menu, .react, .zoom")) this.closeMenus();
+      if (!(e.target as HTMLElement).closest(".menu, .react, .zoom, .day-tag, [data-act='day']")) this.closeMenus();
+    });
+    this.whenMenu.addEventListener("pointerdown", (e) => e.stopPropagation());
+    this.whenMenu.addEventListener("click", (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLButtonElement>("button");
+      if (!b) return;
+      if (b.dataset.day) board.setWhen({ day: Number(b.dataset.day) });
+      else if (b.dataset.time === "none") board.setWhen({ time: NO_TIME });
+      else if (b.dataset.when === "words") board.setWhen({ day: FROM_WORDS, time: FROM_WORDS });
+      else if (b.dataset.when === "done") return void this.closeMenus();
+      this.renderWhen();
+    });
+    this.whenMenu.addEventListener("change", (e) => {
+      const input = e.target as HTMLInputElement;
+      if (input.name === "time") {
+        // Leave the field alone while it is being typed into: just apply it.
+        const m = /^(\d{2}):(\d{2})/.exec(input.value);
+        board.setWhen({ time: m ? Number(m[1]) * 60 + Number(m[2]) : NO_TIME });
+        const none = this.whenMenu.querySelector<HTMLElement>("[data-time='none']");
+        none?.classList.toggle("on", !m);
+        none?.setAttribute("aria-pressed", String(!m));
+        return;
+      } else if (input.name === "week" && /^\d{4}-\d{2}-\d{2}$/.test(input.value)) {
+        const weekOf = mondayOf(input.value);
+        if (weekOf !== board.state.meta.weekOf) board.setMeta({ weekOf });
+      }
+      this.renderWhen();
+    });
+    this.whenMenu.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        this.closeMenus();
+      }
+      e.stopPropagation();
     });
     $(".share").addEventListener("click", () => this.share());
     $(".export").addEventListener("click", () => this.exportWeek());
@@ -195,6 +232,7 @@ export class Chrome {
       const act = b.dataset.act;
       if (b.dataset.color) board.recolor(b.dataset.color);
       else if (act === "vote") board.toggleVote();
+      else if (act === "day") this.openWhen(b);
       else if (act === "tidy") board.tidy();
       else if (act === "dup") board.duplicate([...board.sel]);
       else if (act === "del") board.deleteSelected();
@@ -227,6 +265,75 @@ export class Chrome {
   private closeMenus() {
     this.reactMenu.classList.remove("open");
     this.zoomMenu.classList.remove("open");
+    this.whenMenu.classList.remove("open");
+  }
+
+  /** Close the day picker if it is open; says whether it was. */
+  closeWhen(): boolean {
+    const open = this.whenMenu.classList.contains("open");
+    this.whenMenu.classList.remove("open");
+    return open;
+  }
+
+  /**
+   * The day picker for the selected notes: the seven days of the board's week
+   * with their dates, "any day", a time, and the week itself.
+   */
+  openWhen(by?: HTMLElement) {
+    const notes = this.board.selected().filter((it) => it.type === "note");
+    if (!notes.length) {
+      if (this.board.sel.size) this.toast("Pick a day for notes: select a note first.");
+      return;
+    }
+    this.board.editor.commit();
+    this.closeMenus();
+    this.renderWhen();
+    this.whenMenu.classList.add("open");
+    const m = this.whenMenu.getBoundingClientRect();
+    const anchor = by ?? this.selbar.querySelector<HTMLElement>("[data-act='day']") ?? this.selbar;
+    const r = anchor.getBoundingClientRect();
+    let left = r.left + r.width / 2 - m.width / 2;
+    let top = r.bottom + 10;
+    if (top + m.height > innerHeight - 8) top = r.top - m.height - 10;
+    left = Math.max(8, Math.min(innerWidth - m.width - 8, left));
+    top = Math.max(8, Math.min(innerHeight - m.height - 8, top));
+    this.whenMenu.style.left = `${Math.round(left)}px`;
+    this.whenMenu.style.top = `${Math.round(top)}px`;
+    this.whenMenu.querySelector<HTMLButtonElement>("button.on, [data-day]")?.focus({ preventScroll: true });
+  }
+
+  private renderWhen() {
+    const b = this.board;
+    const notes = b.selected().filter((it): it is NoteItem => it.type === "note");
+    if (!notes.length) return this.closeMenus();
+    const weekOf = b.state.meta.weekOf || nextMonday();
+    const days = notes.map(noteDay);
+    const day = days.every((d) => d === days[0]) ? days[0] : undefined;
+    const times = notes.map(noteTime);
+    const time = times.every((t) => t === times[0]) ? times[0] : undefined;
+    const byHand = notes.some((n) => dayPicked(n) || timePicked(n));
+    const fromWords = notes.every((n) => !dayPicked(n));
+    const cell = (i: number) => {
+      const on = day !== undefined && (i === ANY ? day === null : day === i);
+      const label = i === ANY ? "Any day" : `${DAY_NAMES[i]} ${dateOf(weekOf, i).getDate()}`;
+      return `<button data-day="${i}" class="${on ? "on" : ""}${on && fromWords ? " auto" : ""}" aria-pressed="${on}" aria-label="${label}"><b>${i === ANY ? "ANY" : DAY_HEADERS[i]}</b><small>${i === ANY ? "day" : dateOf(weekOf, i).getDate()}</small></button>`;
+    };
+    let hint = "";
+    if (notes.length === 1) {
+      const n = notes[0];
+      const named = findDay(n.text);
+      if (dayPicked(n)) hint = "Picked by hand: this wins over the words on the note.";
+      else if (named) hint = `Read from “${escapeHtml(n.text.slice(named.index, named.index + named.length))}” on the note. Pick a day to change it.`;
+      else hint = "The note names no day yet, so it goes under ANY DAY. Pick one.";
+    } else hint = `${notes.length} notes selected: a day you pick applies to all of them.`;
+    const month = dateOf(weekOf, 0).toLocaleString("en-GB", { month: "short" });
+    this.whenMenu.innerHTML =
+      `<div class="when-top"><b>Day</b><label class="when-week">Week of <input type="date" name="week" value="${weekOf}" aria-label="Week starting"></label></div>` +
+      `<div class="when-days" aria-label="Days of the week of ${dateOf(weekOf, 0).getDate()} ${month}">${[0, 1, 2, 3, 4, 5, 6, ANY].map(cell).join("")}</div>` +
+      `<div class="when-time"><label>Time <input type="time" name="time" step="300" value="${time !== undefined && time !== null ? formatTime(time) : ""}"></label>` +
+      `<button data-time="none" class="${time === null ? "on" : ""}" aria-pressed="${time === null}">No time</button></div>` +
+      `<p class="when-hint">${hint}</p>` +
+      `<div class="when-foot">${byHand ? `<button data-when="words">Read from the words again</button>` : "<span></span>"}<button data-when="done" class="done">Done</button></div>`;
   }
 
   // ---------------------------------------------------------------- updates
@@ -274,6 +381,7 @@ export class Chrome {
 
   onSelection() {
     this.updatePill();
+    if (this.whenMenu.classList.contains("open") && !this.whenMenu.contains(document.activeElement)) this.renderWhen();
     const items = this.board.selected();
     if (!items.length || this.board.editor.id) {
       this.selbar.classList.remove("show");
@@ -287,6 +395,7 @@ export class Chrome {
     this.selbar.innerHTML =
       (colorable ? `<div class="swatches">${PALETTE.map((c) => `<button data-color="${c}" style="--c:${c}" aria-label="Colour ${c}"></button>`).join("")}</div><span class="sep"></span>` : "") +
       (notes.length ? `<button data-act="vote" class="${myVote ? "on" : ""}" title="Vote" style="--me:${this.board.me.color}">${icon("vote")}<span>${myVote ? "Voted" : "Vote"}</span></button>` : "") +
+      (notes.length ? `<button data-act="day" title="Pick the day · D" aria-haspopup="dialog">${icon("day")}<span>${escapeHtml(this.dayButtonLabel(notes as NoteItem[]))}</span></button>` : "") +
       (editable ? `<button data-act="edit" class="phone-only" title="Edit">${icon("edit")}<span>Edit</span></button>` : "") +
       (notes.length ? `<button data-act="tidy" title="Tidy these up">${icon("fit")}<span>Tidy</span></button>` : "") +
       `<button data-act="dup" title="Duplicate · ⌘D" aria-label="Duplicate">${icon("copy")}</button>` +
@@ -294,6 +403,15 @@ export class Chrome {
     this.selbar.classList.add("show");
     this.board.root.classList.toggle("has-selection", true);
     this.placeSelectionBar();
+  }
+
+  private dayButtonLabel(notes: NoteItem[]): string {
+    const days = notes.map(noteDay);
+    if (!days.every((d) => d === days[0])) return "Day";
+    const d = days[0];
+    if (d === null) return notes.some(dayPicked) ? "Any day" : "Day";
+    const weekOf = this.board.state.meta.weekOf;
+    return weekOf ? `${DAY_HEADERS[d].charAt(0)}${DAY_HEADERS[d].slice(1).toLowerCase()} ${dateOf(weekOf, d).getDate()}` : DAY_NAMES[d];
   }
 
   placeSelectionBar() {
@@ -522,15 +640,6 @@ export class Chrome {
       else download(`${fileStem(m)}.csv`, toCsv(m, b.state.list()), "text/csv");
     });
   }
-}
-
-/** The Monday of the week a date falls in. */
-function mondayOf(iso: string): string {
-  const [y, m, d] = iso.split("-").map(Number);
-  const date = new Date(y, m - 1, d);
-  const back = (date.getDay() + 6) % 7;
-  date.setDate(date.getDate() - back);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
 function download(name: string, text: string, type: string) {

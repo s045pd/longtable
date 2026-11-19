@@ -83,3 +83,48 @@ export function dateOf(weekOf: string, day: number): Date {
   const [y, m, d] = weekOf.split("-").map(Number);
   return new Date(y, m - 1, d + day);
 }
+
+/** The Monday of the week a date falls in, as YYYY-MM-DD. */
+export function mondayOf(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const date = new Date(y, m - 1, d);
+  date.setDate(date.getDate() - ((date.getDay() + 6) % 7));
+  return isoDate(date);
+}
+
+// A note's day and time can also be picked by hand, and then win over its
+// words. `day`: 0 = Monday … 6 = Sunday, 7 = "any day"; -1 (or no field)
+// means read it from the words. `time`: minutes after midnight; -2 = no
+// time; -1 (or no field) means read it from the words.
+export const ANY = 7;
+export const FROM_WORDS = -1;
+export const NO_TIME = -2;
+
+interface Whenable {
+  text: string;
+  day?: number;
+  time?: number;
+}
+
+export const dayPicked = (n: Whenable) => n.day !== undefined && n.day >= 0;
+export const timePicked = (n: Whenable) => n.time !== undefined && n.time !== FROM_WORDS;
+
+/** The day a note is for (0 = Monday … 6 = Sunday), or null for any day. */
+export function noteDay(n: Whenable): number | null {
+  if (dayPicked(n)) return n.day! >= ANY ? null : n.day!;
+  return findDay(n.text)?.day ?? null;
+}
+
+/** The time a note is at, in minutes after midnight, or null. */
+export function noteTime(n: Whenable): number | null {
+  if (timePicked(n)) return n.time! < 0 ? null : n.time!;
+  return findTime(n.text);
+}
+
+/** "SAT 28" (or "SAT" without a week), "ANY DAY", plus " · 10:00" when timed. */
+export function whenLabel(n: Whenable, weekOf: string): string {
+  const day = noteDay(n);
+  const time = noteTime(n);
+  const d = day === null ? ANY_DAY : weekOf ? `${DAY_HEADERS[day]} ${dateOf(weekOf, day).getDate()}` : DAY_HEADERS[day];
+  return time === null ? d : `${d} · ${formatTime(time)}`;
+}

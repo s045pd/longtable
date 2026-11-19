@@ -1,6 +1,7 @@
 // Pointer, touch and keyboard. One gesture at a time: pan, pinch, marquee,
 // drag, or draw. A press only becomes a drag after it has moved a few
 // pixels, so a click stays a click.
+import { planDrop } from "../shared/tidy";
 import type { Item, Op } from "../shared/types";
 import type { Board } from "./app";
 
@@ -19,7 +20,19 @@ type Gesture =
       wasSelected: boolean;
       shift: boolean;
     }
-  | { kind: "drag"; id: number; wx: number; wy: number; start: Map<string, { x: number; y: number }>; lastSend: number; raise: Op[] }
+  | {
+      kind: "drag";
+      id: number;
+      wx: number;
+      wy: number;
+      start: Map<string, { x: number; y: number }>;
+      lastSend: number;
+      raise: Op[];
+      /** Notes that sat in the week when the drag began. */
+      leaving: string[];
+      /** True when the week itself is being carried. */
+      weekToo: boolean;
+    }
   | { kind: "draw"; id: number; stroke: string; ox: number; oy: number; pts: number[]; lastSend: number };
 
 const DRAG_SLOP = 4;
@@ -98,6 +111,12 @@ export function attachInput(board: Board) {
     // Select tool.
     if (tick && target) {
       board.toggleRow(target, Number(tick.dataset.row));
+      return;
+    }
+    const dayTag = (e.target as HTMLElement).closest<HTMLElement>(".day-tag");
+    if (dayTag && target) {
+      board.setSelection([target]);
+      board.chrome.openWhen(dayTag);
       return;
     }
     if (target) {
@@ -222,7 +241,11 @@ export function attachInput(board: Board) {
     if (raise.length) board.commit(raise, { history: false });
     for (const id of carried) board.views.get(id)?.el.classList.add("lifted");
     const [wx, wy] = world(e);
-    g = { kind: "drag", id: e.pointerId, wx, wy, start, lastSend: 0, raise: zBefore };
+    const week = board.state.list().find((it) => it.type === "week");
+    const inWeek = new Set(week ? board.weekNotes(week.id) : []);
+    const leaving = [...carried].filter((id) => inWeek.has(id));
+    const weekToo = !!week && carried.has(week.id);
+    g = { kind: "drag", id: e.pointerId, wx, wy, start, lastSend: 0, raise: zBefore, leaving, weekToo };
     board.root.classList.add("dragging");
   }
 
@@ -270,8 +293,15 @@ export function attachInput(board: Board) {
         }
         // Send the final resting place for sure.
         board.link.ops(redo);
-        board.remember(undo, redo);
         board.root.classList.remove("dragging");
+        // Notes let go of over the week take that column's day and slot in.
+        const dropped = [...g.start.keys()].filter((id) => board.state.items.get(id)?.type === "note");
+        const drop = cancelled || g.weekToo ? [] : planDrop(board.state.list(), dropped, g.leaving, () => board.newItemId());
+        if (drop.length) {
+          const back = board.commit(drop, { history: false, motion: () => ({ kind: "spring", delay: 0 }) });
+          board.remember([...back, ...undo], [...redo, ...drop]);
+          board.announceDays(drop);
+        } else board.remember(undo, redo);
         break;
       }
       case "draw": {
@@ -400,6 +430,7 @@ export function attachInput(board: Board) {
         board.deleteSelected();
         return;
       case "Escape":
+        if (board.chrome.closeWhen()) return;
         if (board.following) board.follow(null);
         else if (board.tool !== "select") board.setTool("select");
         else board.setSelection([]);
@@ -443,6 +474,7 @@ export function attachInput(board: Board) {
     const tools: Record<string, Board["tool"]> = { v: "select", n: "note", p: "pen", t: "text", c: "check", h: "hand" };
     if (tools[k]) board.setTool(tools[k]);
     else if (k === "u") board.tidy();
+    else if (k === "d") board.chrome.openWhen();
   });
   addEventListener("keyup", (e) => {
     if (e.key === " ") {
