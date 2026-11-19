@@ -354,7 +354,8 @@ Caveat for handwritten captions.
 Copyright © 2026 s045pd. Longtable is free software under the
 [GNU Affero General Public License v3.0](LICENSE): use it, change it and run
 it for your team as you like. If you run a changed version for other people
-over a network, offer them the source of your changes too.
+over a network, offer them the source of your changes too. Want to help?
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 The fonts are bundled from [Fontsource](https://fontsource.org) under the SIL
 Open Font License: Inter, Bricolage Grotesque, Caveat and JetBrains Mono.

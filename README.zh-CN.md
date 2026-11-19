@@ -315,6 +315,7 @@ e2e/          端到端测试
 
 Copyright © 2026 s045pd。Longtable 是自由软件，使用 [GNU Affero 通用公共许可证 v3.0](LICENSE)：
 可以随便用、随便改，给自己的团队部署也没有限制。如果把改过的版本通过网络提供给别人用，也要把你改动的源代码提供给他们。
+想一起改进的话，请看 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 字体都从 [Fontsource](https://fontsource.org) 打包进来，使用 SIL Open Font License：
 Inter、Bricolage Grotesque、Caveat 和 JetBrains Mono。Pell & Rye 这家店、白板上的人和他们计划的事全是虚构的。
