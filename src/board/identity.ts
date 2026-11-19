@@ -3,6 +3,7 @@
 // windows and blocked storage throw.
 import { randomId } from "../shared/ids";
 import type { BoardKeys } from "./net";
+import type { Item, Meta } from "../shared/types";
 
 export interface Identity {
   cid: string;
@@ -140,3 +141,44 @@ export function keysFromHash(hash: string): BoardKeys {
 
 /** A board's link for one of its keys. */
 export const boardLink = (id: string, kind: "k" | "v" | "o", key: string) => `${location.origin}/b/${id}#${kind}=${key}`;
+
+// ------------------------------------------------------------- the demo, carried
+// "Make it a real board" on the demo: what is on it waits here (this tab only)
+// until the new board exists, then goes onto it.
+export interface Carry {
+  items: Item[];
+  meta: Pick<Meta, "client" | "file" | "weekOf">;
+  /** Open the new board's Share dialog. */
+  share: boolean;
+}
+const CARRY = "longtable:carry";
+
+export function putCarry(c: Carry) {
+  try {
+    sessionStorage.setItem(CARRY, JSON.stringify(c));
+  } catch {
+    // too big or blocked: the new board starts blank
+  }
+}
+
+/** Hand what is waiting to the board just made. */
+export function carryTo(id: string) {
+  try {
+    const raw = sessionStorage.getItem(CARRY);
+    sessionStorage.removeItem(CARRY);
+    if (raw) sessionStorage.setItem(`${CARRY}:${id}`, raw);
+  } catch {
+    // ignore
+  }
+}
+
+export function takeCarry(id: string): Carry | null {
+  try {
+    const raw = sessionStorage.getItem(`${CARRY}:${id}`);
+    sessionStorage.removeItem(`${CARRY}:${id}`);
+    const c = raw ? JSON.parse(raw) : null;
+    return c && Array.isArray(c.items) && c.meta ? c : null;
+  } catch {
+    return null;
+  }
+}

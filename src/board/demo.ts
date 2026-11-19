@@ -61,6 +61,8 @@ export class Demo {
   playing = false;
   /** Whether it has started at least once (the button then says Replay). */
   played = false;
+  /** Whether you have changed the board yourself since the demo handed it over. */
+  edited = false;
   private run = 0;
   private actors = new Map<Who, Actor>();
   private seed = new Map<string, Item>();
@@ -89,6 +91,14 @@ export class Demo {
       b.cam.set(b.cam.fitView(plan.box, b.insets(), 1));
     }
     this.playing = false;
+    this.edited = false;
+    this.board.chrome.onDemo();
+  }
+
+  /** You changed something on the handed-over board: say it is only yours, and offer to make it real. */
+  touch() {
+    if (this.playing || this.edited) return;
+    this.edited = true;
     this.board.chrome.onDemo();
   }
 
@@ -143,6 +153,7 @@ export class Demo {
     if (dels.length) b.commit(dels, { history: false });
     b.clearHistory();
     b.chrome.clearSorted();
+    this.edited = false;
     b.chrome.onPeople();
     this.seed = new Map(makeTemplate("pell-and-rye").items.map((it) => [it.id, it]));
   }

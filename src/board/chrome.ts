@@ -134,6 +134,7 @@ export class Chrome {
       <div class="demo-shield" aria-hidden="true"></div>
       <div class="corner"><span class="corner-tag"></span><button class="sample-btn" hidden></button><span class="demo-controls"></span></div>
       <div class="gate" hidden></div>
+      <div class="demo-note" hidden role="status"><span><b>Only you can see this.</b> It’s the demo<span class="wide">: nothing here is saved or shared</span>.</span><button class="btn primary" data-demo="real">Make it a real board</button></div>
     `,
     );
     const $ = <T extends HTMLElement>(s: string) => root.querySelector(s) as T;
@@ -249,12 +250,16 @@ export class Chrome {
     });
     this.followEl.addEventListener("click", () => board.follow(null));
     root.querySelector(".sample-btn")!.addEventListener("click", () => (board.sampleTeam.active ? board.sampleTeam.stop() : board.sampleTeam.start()));
+    root.querySelector(".demo-note")!.addEventListener("click", (e) => {
+      if ((e.target as HTMLElement).closest("[data-demo='real']")) board.makeReal(true);
+    });
     root.querySelector(".demo-controls")!.addEventListener("click", (e) => {
       const act = (e.target as HTMLElement).closest<HTMLButtonElement>("button")?.dataset.demo;
       if (act === "play") location.href = `/demo?back=${encodeURIComponent(location.pathname)}`;
       else if (act === "stop") board.demo?.stop();
       else if (act === "replay") board.demo?.start();
-      else if (act === "own") location.href = "/new?template=pell-and-rye";
+      // Changed the demo? Your changes come along. Untouched? A fresh copy of the example, to tidy yourself.
+      else if (act === "own") board.demo?.edited ? board.makeReal(false) : (location.href = "/new?template=pell-and-rye");
       else if (act === "blank") location.href = "/new?template=blank";
       else if (act === "boards") this.openBoards((e.target as HTMLElement).closest("button")!);
       else if (act === "back") location.href = demoBack() ?? "/";
@@ -546,6 +551,8 @@ export class Chrome {
     const stop = '<svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><rect x="2" y="2" width="8" height="8" rx="1.5" fill="currentColor"/></svg>';
     const caret = '<svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M3 4.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>';
     this.board.root.classList.toggle("demo-playing", !!demo?.playing);
+    const note = this.board.root.querySelector<HTMLElement>(".demo-note")!;
+    note.hidden = !demo || demo.playing || !demo.edited;
     if (!demo) {
       slot.innerHTML = `<button class="sample-btn demo-btn" data-demo="play" title="Watch five made-up people plan a week on a board of its own, then tidy it">${play}Play the demo</button>`;
       return;
@@ -737,13 +744,26 @@ export class Chrome {
 
   /** The share dialog of a board kept in this browser (development, or the demo). */
   private shareLocal() {
+    const b = this.board;
+    if (b.demo) {
+      b.demo.stop();
+      const d = this.dialog(
+        `
+        <h2>Share this board</h2>
+        <p class="muted">This is the demo. It runs in this tab only, so anyone you send this page to just gets the demo from the start, not your board.</p>
+        <p class="muted">Make it a real board first: everything on it now comes along, it’s saved, and you get a link that brings people onto it with you, live.</p>
+        <div class="actions wrap"><button class="btn ghost" data-close>Cancel</button><a class="btn ghost" href="/new?template=blank">Start a blank board</a><button class="btn primary" data-act="real">Make it a real board and share</button></div>`,
+        "share-dialog demo-share",
+      );
+      d.el.querySelector("[data-act='real']")!.addEventListener("click", () => b.makeReal(true));
+      return;
+    }
     const url = location.href.split("#")[0].split("?")[0];
-    const demo = !!this.board.demo;
     const d = this.dialog(`
       <h2>Plan it together</h2>
-      <p class="muted">${demo ? "This is the demo: it lives in this tab only. Make a board of your own to share it." : "This board is kept in this browser only (no server is running), so its link opens it in this browser’s other tabs."}</p>
+      <p class="muted">This board is kept in this browser only (no server is running), so its link opens it in this browser’s other tabs.</p>
       <div class="linkrow"><input readonly value="${escapeHtml(url)}" aria-label="Board link"/><button class="btn primary copy">Copy link</button></div>
-      <div class="actions">${demo ? '<a class="btn ghost" href="/new?template=pell-and-rye">Make your own board</a>' : '<button class="btn ghost" data-act="settings">Board settings</button>'}<button class="btn ghost" data-close>Done</button></div>
+      <div class="actions"><button class="btn ghost" data-act="settings">Board settings</button><button class="btn ghost" data-close>Done</button></div>
     `);
     d.el.querySelector(".copy")!.addEventListener("click", () => this.copy(url, "Link copied"));
     d.el.querySelector("[data-act='settings']")?.addEventListener("click", () => {

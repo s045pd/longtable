@@ -14,7 +14,7 @@ import { Camera, type Insets } from "./camera";
 import { Chrome } from "./chrome";
 import { measureLabel, resetFits } from "./fit";
 import { Grid } from "./grid";
-import { boardLink, forgetBoard, loadIdentity, rememberBoard, saveIdentity, saveKeys, deviceId, type Identity } from "./identity";
+import { boardLink, forgetBoard, loadIdentity, putCarry, rememberBoard, saveIdentity, saveKeys, takeCarry, deviceId, type Identity } from "./identity";
 import { attachInput } from "./input";
 import { DemoLink, LiveLink, LocalLink, type BoardKeys, type InitData, type Link, type LinkStatus } from "./net";
 import { Demo } from "./demo";
@@ -190,10 +190,17 @@ export class Board {
       }
       return;
     }
-    rememberBoard(this.id, [d.meta.client, d.meta.file].filter(Boolean).join(" · "));
+    // A board just made from the demo: what was on the demo comes along.
+    const carry = this.firstInit && d.access.role === "owner" && this.state.items.size === 0 ? takeCarry(this.id) : null;
+    if (carry) {
+      for (let i = 0; i < carry.items.length; i += 300) this.commit(carry.items.slice(i, i + 300).map((item) => ({ op: "put", item }) as Op), { history: false });
+      this.commit([{ op: "meta", set: carry.meta }], { history: false });
+    }
+    rememberBoard(this.id, [this.state.meta.client, this.state.meta.file].filter(Boolean).join(" · "));
     if (this.firstInit) {
       this.firstInit = false;
       this.fitAll(false);
+      if (carry?.share) this.chrome.share();
       if (!loadIdentity()?.name) this.chrome.askName(this.suggestColor());
     }
   }
@@ -241,6 +248,18 @@ export class Board {
     this.chrome.onMeta();
     this.chrome.onPeople();
     this.chrome.onItems();
+  }
+
+  /**
+   * Turn the demo into a real board: what is on it now goes along to a new
+   * board of yours, which opens (with its Share dialog when asked).
+   */
+  makeReal(share: boolean) {
+    this.demo?.stop();
+    this.editor.commit();
+    const m = this.state.meta;
+    putCarry({ items: this.state.list(), meta: { client: m.client, file: m.file, weekOf: m.weekOf }, share });
+    location.href = "/new?template=blank&carry=1";
   }
 
   /** Every item off the board, for everyone, as one step undo takes back. */
@@ -347,6 +366,7 @@ export class Board {
   /** Record a finished change for undo (used when it was applied bit by bit, like a drag). */
   remember(undo: Op[], redo: Op[]) {
     if (!undo.length && !redo.length) return;
+    this.demo?.touch();
     this.undoStack.push({ undo, redo });
     if (this.undoStack.length > 200) this.undoStack.shift();
     this.redoStack = [];

@@ -267,6 +267,47 @@ try {
   await D.keyboard.press("Escape");
   check(!(await D.evaluate(() => document.querySelector(".board-app").classList.contains("demo-playing"))), "Esc stops the demo and hands the board over");
 
+  // Sharing from the demo: it makes a real board first, so the link brings people onto it, live.
+  await D.click(".topbar .share");
+  check(await D.isVisible(".demo-share [data-act='real']"), "on the demo, Share says it lives in this tab only and offers to make it a real board");
+  await D.keyboard.press("Escape");
+  await wait(300);
+  const spot = await D.evaluate(() => {
+    for (let y = 200; y < 700; y += 20) for (let x = 200; x < 1100; x += 20) if (document.elementFromPoint(x, y)?.classList.contains("grid")) return [x, y];
+    return [640, 400];
+  });
+  check(!(await D.isVisible(".demo-note")), "the demo doesn't nag before you change anything");
+  await D.mouse.dblclick(spot[0], spot[1]);
+  await D.keyboard.type("Window paint Thu", { delay: 10 });
+  await D.keyboard.press("Escape");
+  await settle(D.waitForSelector(".demo-note", { state: "visible", timeout: 3000 }), "once you change the demo, it says only you can see it");
+  const demoCount = await D.$$eval(".item", (e) => e.length);
+  await D.click(".demo-note [data-demo='real']");
+  if (TEAM) {
+    await D.waitForSelector(".team-form");
+    await D.fill(".team-form input", TEAM);
+    await D.click(".team-form button[type=submit]");
+  }
+  await D.waitForSelector(".share-dialog.open input[readonly]", { timeout: 8000 });
+  const realLink = await D.$eval(".share-dialog.open input[readonly]", (e) => e.value);
+  check(/\/b\/[a-z0-9]{10}#k=[a-z0-9]{26}$/.test(realLink), "“Make it a real board” opens a real board with its Share dialog and edit link");
+  await wait(600);
+  const realCount = await D.$$eval(".item", (e) => e.length);
+  const words = (page) => page.$$eval(".item.note .words", (els) => els.map((e) => e.textContent.replace(/\s/g, "")).join("|"));
+  check(realCount === demoCount && (await words(D)).includes("WindowpaintThu"), `everything on the demo came along, your change too (${realCount} of ${demoCount})`);
+  const E = await person(browser, "Bo", "#B8E986");
+  await E.goto(realLink);
+  await E.waitForSelector(".item.note", { state: "attached" });
+  await wait(500);
+  check((await E.$$eval(".item", (e) => e.length)) === realCount && (await words(E)).includes("WindowpaintThu"), "someone opening that link gets the same board, not the demo");
+  await D.keyboard.press("Escape");
+  await E.mouse.move(400, 300);
+  await E.mouse.move(520, 380, { steps: 6 });
+  await settle(
+    D.waitForFunction(() => [...document.querySelectorAll(".someone:not(.away) .flag")].some((f) => f.textContent === "Bo"), null, { timeout: 5000 }),
+    "and the two of them see each other live",
+  );
+
   // The front page is the demo, playing as soon as it opens; with reduced motion it shows the ending instead.
   const F = await person(browser, "Visitor", "#C9B6FF");
   await F.goto(`${base}/`);

@@ -11,7 +11,7 @@ import { Board } from "./board/app";
 import { BOARD_ID, newBoardId } from "./shared/ids";
 import { TEMPLATES, type TemplateName } from "./shared/templates";
 import { renderLanding } from "./landing";
-import { keysFromHash, loadKeys, saveKeys } from "./board/identity";
+import { carryTo, keysFromHash, loadKeys, saveKeys } from "./board/identity";
 
 const app = document.getElementById("app")!;
 const params = new URLSearchParams(location.search);
@@ -25,7 +25,9 @@ const TEAM = "longtable:team";
  */
 export async function startBoard(template: TemplateName, password?: string) {
   if (!LIVE) {
-    history.pushState({}, "", `/b/${newBoardId()}?t=${template}`);
+    const id = newBoardId();
+    if (params.has("carry")) carryTo(id);
+    history.pushState({}, "", `/b/${id}?t=${template}`);
     return route();
   }
   let saved: string | undefined;
@@ -60,6 +62,7 @@ export async function startBoard(template: TemplateName, password?: string) {
     }
   }
   saveKeys(made.id, { key: made.edit, owner: made.owner });
+  if (params.has("carry")) carryTo(made.id);
   history.pushState({}, "", `/b/${made.id}#k=${made.edit}`);
   route();
 }
