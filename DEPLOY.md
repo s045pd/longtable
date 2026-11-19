@@ -56,10 +56,10 @@ own. Under *Settings → Secrets and variables → Actions*, add the secret
 Deploy to Cloudflare → Run workflow*. To deploy on every push to `main`, add
 the repository variable `AUTO_DEPLOY` = `true`.
 
-**Deploy to Cloudflare button.** Once the Longtable repository is public,
-its README has a button that does all of this from the browser. It copies the
-code into your GitHub account and deploys it, so you don't need a token or
-Node.
+**Deploy to Cloudflare button.** The README's button does all of this from
+the browser: it copies the code into your GitHub account and deploys it, so
+you don't need a token or Node. It works only while the Longtable repository
+is public.
 
 **By hand.** `npx wrangler login`, then `npm install` and `npm run deploy`.
 
@@ -69,7 +69,8 @@ Node.
   can start a board on it. To keep that to your team, set a **team
   password**. Setup asks for it. Or add a secret named `CREATE_PASSWORD`
   under *Workers → your worker → Settings → Variables and Secrets*. People
-  you send a board link to never need it.
+  you send a board link to never need it. Either way, one address can start
+  at most 30 boards an hour, so a script can't use up the day's free quota.
 - **Opening a board.** Only someone with one of the board's links gets in.
   The board's address alone opens nothing. The secret part of the link comes
   after the `#`, and browsers never send that part to a server, so it stays
@@ -85,6 +86,8 @@ Node.
     screen, including people who are on the board right then. After five
     wrong tries the board makes you wait, from 30 seconds up to 15 minutes.
     The password is stored only as a salted PBKDF2 hash.
+    The count of wrong tries is kept for a day in the board's storage, under
+    a hash of the address rather than the address itself.
   - **Make new links.** The old links stop working at once, and everyone
     else leaves the board until they get the new one.
   - **Copy the owner link**, to manage the board from another device.
@@ -127,4 +130,5 @@ Everything on a board is stored in the board's Durable Object in your
 Cloudflare account. Cloudflare encrypts it at rest. Deleting a board erases
 its storage. All that's left is the date it was deleted, so its link can say
 so. Cursors, selections and who is online are passed between people but
-never stored.
+never stored. Addresses are never stored either: counting wrong passwords
+and new boards uses a short hash of the address, forgotten within a day.

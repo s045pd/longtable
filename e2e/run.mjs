@@ -15,6 +15,9 @@
 // gone for everyone; with a team password nobody else can start boards; the
 // security headers are there. No page errors anywhere.
 import { spawn } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { chromium, devices } from "playwright";
 
 const PORT = 8790 + Math.floor(Math.random() * 100);
@@ -22,6 +25,25 @@ let base = process.env.BASE_URL;
 // The local server gets a team password; against BASE_URL, pass the deployment's own (if it has one).
 const TEAM = process.env.BASE_URL ? process.env.TEAM_PASSWORD : "e2e-team-password";
 let server = null;
+let store = null;
+/** Stop wrangler dev and everything it started, and drop its store. */
+function stopServer() {
+  if (server) {
+    try {
+      process.kill(-server.pid, "SIGTERM");
+    } catch {
+      // already gone
+    }
+    server = null;
+  }
+  try {
+    if (store) rmSync(store, { recursive: true, force: true, maxRetries: 3 });
+  } catch {
+    // a temp folder; the system clears it
+  }
+  store = null;
+}
+process.on("exit", stopServer);
 const failures = [];
 const errors = [];
 const check = (ok, what) => {
@@ -31,9 +53,13 @@ const check = (ok, what) => {
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function startServer() {
-  server = spawn("npx", ["wrangler", "dev", "--port", String(PORT), "--ip", "127.0.0.1", "--var", `CREATE_PASSWORD:${TEAM}`], {
+  // A fresh store each run, so boards and counts from an earlier run don't carry over.
+  store = mkdtempSync(join(tmpdir(), "longtable-e2e-"));
+  // Its own process group, so stopping it also stops wrangler's workerd.
+  server = spawn("npx", ["wrangler", "dev", "--port", String(PORT), "--ip", "127.0.0.1", "--persist-to", store, "--var", `CREATE_PASSWORD:${TEAM}`], {
     env: { ...process.env, CI: "true", WRANGLER_SEND_METRICS: "false" },
     stdio: ["ignore", "pipe", "pipe"],
+    detached: true,
   });
   base = `http://127.0.0.1:${PORT}`;
   for (let i = 0; i < 60; i++) {
@@ -48,6 +74,9 @@ async function startServer() {
   throw new Error("wrangler dev did not start");
 }
 
+/** The browser's own line for a refusal this run asks for on purpose. */
+const expected = (name, text) => name === "Eve" && /status of 429/.test(text);
+
 async function person(browser, name, color, options = { viewport: { width: 1280, height: 800 } }) {
   const ctx = await browser.newContext(options);
   await ctx.addInitScript(
@@ -56,7 +85,7 @@ async function person(browser, name, color, options = { viewport: { width: 1280,
   );
   const page = await ctx.newPage();
   page.on("pageerror", (e) => errors.push(`${name}: ${e.message}`));
-  page.on("console", (m) => m.type() === "error" && errors.push(`${name} console: ${m.text()}`));
+  page.on("console", (m) => m.type() === "error" && !expected(name, m.text()) && errors.push(`${name} console: ${m.text()}`));
   return page;
 }
 
@@ -166,6 +195,11 @@ try {
   check(columns === 7, `every note sits in one of seven day columns (got ${columns})`);
   const sorted = await B.$eval(".sorted", (e) => e.textContent);
   check(sorted.includes("Opening week, sorted."), "the closing line reads “Opening week, sorted.”");
+  const centred = await B.$eval(".sorted .line", (e) => {
+    const r = e.getBoundingClientRect();
+    return Math.abs(r.left + r.width / 2 - innerWidth / 2) < 40 && e.parentElement.getBoundingClientRect().height > r.height;
+  });
+  check(centred, "and stands centred, over its count");
 
   // Undo on B takes the tidy back for A.
   await B.keyboard.press("Control+z");
@@ -455,6 +489,24 @@ try {
   const during = await rg.next(["locked", "pass"]);
   check(during?.t === "locked" && during.wait > 0, "even the right password waits out the cooldown");
   rg.close();
+
+  // Guesses sent all at once are counted as they come in, not once checked.
+  const three = await (await makeBoard("blank")).json();
+  const ro3 = await rawSession(three.id, { owner: three.owner });
+  await ro3.next(["init"]);
+  ro3.send({ t: "admin", act: "password", pw: "correct horse" });
+  await ro3.next(["done"]);
+  const burst = await rawSession(three.id, { key: three.edit });
+  await burst.next(["locked"]);
+  for (let i = 0; i < 7; i++) burst.send({ t: "unlock", pw: `guess ${i}` });
+  burst.send({ t: "unlock", pw: "correct horse" });
+  const replies = [];
+  for (let i = 0; i < 8; i++) replies.push(await burst.next(["locked", "pass"]));
+  check(replies.every((r) => r?.t === "locked") && replies.at(-1)?.wait > 0, "eight guesses sent at once: the eighth waits, even when it’s right");
+  burst.close();
+  ro3.send({ t: "admin", act: "delete" });
+  await ro3.next(["done"]);
+  ro3.close();
   ro.send({ t: "admin", act: "delete" });
   await ro.next(["done"]);
   ro.close();
@@ -471,12 +523,29 @@ try {
     await settle(T.waitForSelector(".board-app .empty-hint.show", { timeout: 6000 }), "the team password page lets the team start a board");
   }
 
+  // One address can't start boards without end (only here: it would use up the quota of a real deployment).
+  if (!process.env.BASE_URL) {
+    let res = null;
+    for (let i = 0; i < 40; i++) {
+      res = await makeBoard("blank");
+      if (res.status !== 201) break;
+    }
+    const body = await res.json().catch(() => ({}));
+    check(res.status === 429 && body.error === "too-many-boards" && Number(res.headers.get("retry-after")) > 0, "starting dozens of boards in an hour is slowed down");
+    const T = await person(browser, "Eve", "#FFE38A");
+    await T.goto(`${base}/new?template=blank`);
+    await T.waitForSelector(".team-form");
+    await T.fill(".team-form input", TEAM);
+    await T.click(".team-form button[type=submit]");
+    await settle(T.waitForFunction(() => /didn’t start/.test(document.body.innerText) && /new boards in one hour/.test(document.body.innerText), null, { timeout: 6000 }), "and the page says why, instead of going blank");
+  }
+
   await browser.close();
 } catch (e) {
   failures.push(String(e?.stack ?? e));
   console.error(e);
 } finally {
-  server?.kill();
+  stopServer();
 }
 
 check(errors.length === 0, `no page errors${errors.length ? `:\n  ${errors.join("\n  ")}` : ""}`);

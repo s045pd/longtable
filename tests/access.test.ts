@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Tries, accessFor, checkPassword, hashPassword, newLock, roleFor, same, sha256 } from "../worker/access";
+import { FORGET_TRIES_MS, MemoryTryStore, Tries, accessFor, addressKey, checkPassword, hashPassword, newLock, roleFor, same, sha256 } from "../worker/access";
 import { keysFromHash } from "../src/board/identity";
 import { KEY } from "../src/shared/ids";
 
@@ -65,6 +65,38 @@ describe("passwords", () => {
     expect(t.wait("1.2.3.4", now)).toBe(15 * 60);
     t.clear("1.2.3.4");
     expect(t.wait("1.2.3.4", now)).toBe(0);
+  });
+
+  it("are counted before they are checked, so tries sent at once still meet the wait", () => {
+    const t = new Tries();
+    const now = 1_000_000;
+    // Six tries arrive together: each one is counted as it comes in.
+    const letIn = [0, 1, 2, 3, 4, 5].filter(() => {
+      if (t.wait("a", now)) return false;
+      t.fail("a", now);
+      return true;
+    });
+    expect(letIn.length).toBe(5);
+  });
+
+  it("outlast the room sleeping, and are forgotten a day later", () => {
+    const store = new MemoryTryStore();
+    const now = 1_000_000;
+    const before = new Tries(store);
+    for (let i = 0; i < 5; i++) before.fail("a", now);
+    // A new room (after it slept) reads the same store.
+    const after = new Tries(store);
+    expect(after.wait("a", now + 1000)).toBe(29);
+    expect(after.fail("a", now + 31_000)).toBe(60);
+    expect(new Tries(store).fail("a", now + 31_000 + FORGET_TRIES_MS)).toBe(0);
+  });
+
+  it("key addresses by a hash, never the address", async () => {
+    const k = await addressKey("203.0.113.7");
+    expect(k).not.toContain("203");
+    expect(k).toHaveLength(20);
+    expect(await addressKey("203.0.113.7")).toBe(k);
+    expect(await addressKey("203.0.113.8")).not.toBe(k);
   });
 });
 

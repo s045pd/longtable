@@ -19,7 +19,7 @@ const json = (data: unknown, status = 200, extra: Record<string, string> = {}) =
     },
   });
 
-/** Room set aside for counting wrong team passwords; its name can never be a board's. */
+/** Room set aside for the check in front of starting boards; its name can never be a board's. */
 const GATE = "_gate";
 
 export default {
@@ -39,10 +39,10 @@ export default {
       } catch {
         // an empty body makes a blank board
       }
-      if (env.CREATE_PASSWORD) {
-        const gate = env.BOARDS.get(env.BOARDS.idFromName(GATE));
-        const r = await gate.gate(request.headers.get("CF-Connecting-IP") ?? "local", body.password, env.CREATE_PASSWORD);
-        if (!r.ok) return json({ error: "team-password", ...(r.wait ? { wait: r.wait } : {}) }, r.wait ? 429 : 401, r.wait ? { "retry-after": String(r.wait) } : {});
+      const check = await env.BOARDS.get(env.BOARDS.idFromName(GATE)).mayStart(request.headers.get("CF-Connecting-IP"), body.password, env.CREATE_PASSWORD);
+      if (!check.ok) {
+        const wait = check.wait ? { "retry-after": String(check.wait) } : undefined;
+        return json({ error: check.why === "busy" ? "too-many-boards" : "team-password", ...(check.wait ? { wait: check.wait } : {}) }, check.wait ? 429 : 401, wait);
       }
       const template = validTemplate(body.template) ? (body.template as string) : "blank";
       const id = newBoardId();

@@ -158,6 +158,10 @@ a.btn {
   left: 0;
   top: 0;
 }
+/* Items stack among themselves only, so every selection box and "is typing" tag stays above all of them. */
+.items {
+  z-index: 1;
+}
 .selections {
   z-index: 2;
   pointer-events: none;
@@ -2295,7 +2299,7 @@ a.btn {
   flex: none;
   width: 100% !important;
 }
-.show {
+.dialog .reveal {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -2449,8 +2453,10 @@ a.btn {
   border: 1px solid #33353f;
   font-size: 16px;
 }
-.team .actions {
+.team .actions,
+.lost .actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 16px;
 }

@@ -393,7 +393,7 @@ export function attachInput(board: Board) {
       if (e.key === "Escape" && !board.chrome.closeMenus()) board.demo.stop();
       return;
     }
-    if (typing() || board.root.querySelector(".dialog.open")) return;
+    if (typing() || board.root.querySelector(".dialog.open") || board.root.classList.contains("gated")) return;
     // While something is being edited, keys belong to it, not to the shortcuts.
     if (board.editor.id) {
       if (e.key === "Escape") board.editor.commit();
@@ -495,7 +495,7 @@ export function attachInput(board: Board) {
 
   // Paste plain text: one note per line (up to 30), laid out in a row.
   addEventListener("paste", (e) => {
-    if (typing() || board.demo?.playing) return;
+    if (typing() || board.demo?.playing || board.readOnly) return;
     const text = e.clipboardData?.getData("text/plain")?.trim();
     if (!text) return;
     e.preventDefault();

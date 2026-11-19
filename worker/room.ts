@@ -13,7 +13,7 @@ import { BoardState } from "../src/shared/state";
 import { TEMPLATES, makeTemplate, type TemplateName } from "../src/shared/templates";
 import type { AdminAct, ClientMessage, DeniedReason, Item, Meta, Op, Person, Presence, Role, ServerMessage } from "../src/shared/types";
 import { newKey, randomId } from "../src/shared/ids";
-import { PASSWORD_MAX, PASSWORD_MIN, Tries, accessFor, checkPassword, hashPassword, newLock, roleFor, same, sha256, type Lock } from "./access";
+import { FORGET_TRIES_MS, PASSWORD_MAX, PASSWORD_MIN, Tries, accessFor, addressKey, checkPassword, hashPassword, newLock, roleFor, same, sha256, type Lock, type TryRecord, type TryStore } from "./access";
 
 export interface Env {
   BOARDS: DurableObjectNamespace<BoardRoom>;
@@ -32,7 +32,7 @@ interface Attachment {
   role?: Role;
   /** The link checked out, the password has not yet. */
   locked?: boolean;
-  /** Where the socket comes from, to count wrong passwords. */
+  /** A hash of the address the socket comes from, to count wrong passwords. */
   ip: string;
   /** Wrong passwords on this socket. */
   fails?: number;
@@ -54,6 +54,28 @@ const MAX_MESSAGE = 512 * 1024;
  * through hibernation, and the last person leaving writes at once.
  */
 const FLUSH_MS = 1000;
+/** Boards one address may start in an hour, so a script can't spend the day's free writes. */
+const BOARDS_PER_HOUR = 30;
+
+/** What the check in front of starting a board says. */
+export type StartCheck = { ok: true } | { ok: false; why: "password" | "busy"; wait?: number };
+
+/** Wrong tries kept in the room's own SQLite, so they outlast the room sleeping. */
+class SqlTryStore implements TryStore {
+  constructor(private sql: SqlStorage) {
+    sql.exec("CREATE TABLE IF NOT EXISTS tries (who TEXT PRIMARY KEY, n INTEGER NOT NULL, until INTEGER NOT NULL, at INTEGER NOT NULL)");
+    sql.exec("DELETE FROM tries WHERE at < ?", Date.now() - FORGET_TRIES_MS);
+  }
+  get(who: string): TryRecord | undefined {
+    return this.sql.exec<{ n: number; until: number; at: number }>("SELECT n, until, at FROM tries WHERE who = ?", who).toArray()[0];
+  }
+  set(who: string, t: TryRecord) {
+    this.sql.exec("INSERT OR REPLACE INTO tries (who, n, until, at) VALUES (?, ?, ?, ?)", who, t.n, t.until, t.at);
+  }
+  delete(who: string) {
+    this.sql.exec("DELETE FROM tries WHERE who = ?", who);
+  }
+}
 
 export class BoardRoom extends DurableObject<Env> {
   private state!: BoardState;
@@ -65,7 +87,9 @@ export class BoardRoom extends DurableObject<Env> {
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   /** The board's keys and password; null on a board made before boards had keys, or none at all. */
   private lock: Lock | null = null;
-  private tries = new Tries();
+  private tries!: Tries;
+  /** Sockets whose hello is being checked: a second hello meanwhile only renames. */
+  private checking = new Set<string>();
 
   /** When the board last wrote its "touched" time (once a minute is plenty). */
   private touchedAt = 0;
@@ -87,6 +111,7 @@ export class BoardRoom extends DurableObject<Env> {
     this.state = new BoardState(meta ? (JSON.parse(meta) as Meta) : EMPTY_META, items);
     const lock = this.row("lock");
     this.lock = lock ? (JSON.parse(lock) as Lock) : null;
+    this.tries = new Tries(new SqlTryStore(sql));
   }
 
   private row(k: string): string | null {
@@ -159,19 +184,30 @@ export class BoardRoom extends DurableObject<Env> {
   }
 
   /**
-   * The check in front of starting boards when the deployment has a team
-   * password. It runs in one room set aside for it, so wrong guesses are
-   * counted (and slowed) like a board's.
+   * The check in front of starting a board. It runs in one room set aside for
+   * it: the team password, when the deployment has one, with wrong guesses
+   * counted (and slowed) like a board's; then at most BOARDS_PER_HOUR boards
+   * an hour from one address.
    */
-  async gate(ip: string, given: unknown, expected: string): Promise<{ ok: boolean; wait?: number }> {
-    const wait = this.tries.wait(ip);
-    if (wait) return { ok: false, wait };
-    if (typeof given === "string" && same(await sha256(given), await sha256(expected))) {
-      this.tries.clear(ip);
-      return { ok: true };
+  async mayStart(ip: string | null, given: unknown, expected: string | undefined): Promise<StartCheck> {
+    const who = await addressKey(ip);
+    if (expected) {
+      const wait = this.tries.wait(who);
+      if (wait) return { ok: false, why: "password", wait };
+      const next = this.tries.fail(who);
+      if (typeof given !== "string" || !same(await sha256(given), await sha256(expected))) {
+        return { ok: false, why: "password", ...(next ? { wait: next } : {}) };
+      }
+      this.tries.clear(who);
     }
-    const next = this.tries.fail(ip);
-    return { ok: false, ...(next ? { wait: next } : {}) };
+    const sql = this.ctx.storage.sql;
+    sql.exec("CREATE TABLE IF NOT EXISTS started (who TEXT PRIMARY KEY, n INTEGER NOT NULL, since INTEGER NOT NULL)");
+    const now = Date.now();
+    sql.exec("DELETE FROM started WHERE since < ?", now - 3600_000);
+    const row = sql.exec<{ n: number; since: number }>("SELECT n, since FROM started WHERE who = ?", who).toArray()[0];
+    if (row && row.n >= BOARDS_PER_HOUR) return { ok: false, why: "busy", wait: Math.ceil((row.since + 3600_000 - now) / 1000) };
+    sql.exec("INSERT OR REPLACE INTO started (who, n, since) VALUES (?, ?, ?)", who, (row?.n ?? 0) + 1, row?.since ?? now);
+    return { ok: true };
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -181,7 +217,7 @@ export class BoardRoom extends DurableObject<Env> {
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     this.ctx.acceptWebSocket(server);
-    const attachment: Attachment = { pid: randomId(8), name: "", color: "#FFFFFF", ready: false, ip: request.headers.get("CF-Connecting-IP") ?? "local" };
+    const attachment: Attachment = { pid: randomId(8), name: "", color: "#FFFFFF", ready: false, ip: await addressKey(request.headers.get("CF-Connecting-IP")) };
     server.serializeAttachment(attachment);
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -312,8 +348,8 @@ export class BoardRoom extends DurableObject<Env> {
   private async hello(ws: WebSocket, me: Attachment, msg: Extract<ClientMessage, { t: "hello" }>) {
     me.name = cleanName(msg.name) || "Guest";
     me.color = cleanColor(msg.color) ?? "#8FD0FF";
-    // Already in: a later hello only renames or recolours.
-    if (me.role) {
+    // Already in (or being let in): a later hello only renames or recolours.
+    if (me.role || this.checking.has(me.pid)) {
       ws.serializeAttachment(me);
       if (me.ready) this.broadcast({ t: "join", person: this.person(me) }, ws);
       return;
@@ -321,6 +357,16 @@ export class BoardRoom extends DurableObject<Env> {
     const deleted = this.deletedAt;
     if (deleted) return this.deny(ws, "deleted", deleted);
     if (!this.seeded) return this.deny(ws, "missing");
+    ws.serializeAttachment(me);
+    this.checking.add(me.pid);
+    try {
+      await this.letIn(ws, me, msg);
+    } finally {
+      this.checking.delete(me.pid);
+    }
+  }
+
+  private async letIn(ws: WebSocket, me: Attachment, msg: Extract<ClientMessage, { t: "hello" }>) {
     let handOver: string | undefined;
     if (!this.lock) {
       // A board from before boards had keys: whoever opens it first becomes its owner.
@@ -333,6 +379,9 @@ export class BoardRoom extends DurableObject<Env> {
     }
     const role = handOver ? "owner" : await roleFor(this.lock, msg.key, msg.owner);
     if (!role) return this.deny(ws, "link");
+    // A rename may have come in while the keys were checked.
+    const latest = ws.deserializeAttachment() as Attachment | null;
+    if (latest) Object.assign(me, { name: latest.name, color: latest.color });
     me.role = role;
     if (role !== "owner" && this.lock.pw && !same(msg.pass, this.lock.pass)) {
       me.locked = true;
@@ -346,6 +395,8 @@ export class BoardRoom extends DurableObject<Env> {
     if (!me.locked || !this.lock?.pw) return;
     const wait = this.tries.wait(me.ip);
     if (wait) return this.send(ws, { t: "locked", wrong: true, wait });
+    // Counted before the check, so guesses sent all at once still meet the wait.
+    const next = this.tries.fail(me.ip);
     const ok = await checkPassword(pw, this.lock.pw);
     // The socket may have gone, or the password changed, while the check ran.
     const now = ws.deserializeAttachment() as Attachment | null;
@@ -353,7 +404,6 @@ export class BoardRoom extends DurableObject<Env> {
     if (!ok) {
       now.fails = (now.fails ?? 0) + 1;
       ws.serializeAttachment(now);
-      const next = this.tries.fail(now.ip);
       this.send(ws, { t: "locked", wrong: true, ...(next ? { wait: next } : {}) });
       if (now.fails >= 30) ws.close(4008, "Too many tries");
       return;

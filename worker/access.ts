@@ -83,30 +83,68 @@ export const accessFor = (lock: Lock, role: Role): Access => ({
   ...(role === "viewer" ? {} : { edit: lock.edit }),
 });
 
+/** Wrong tries from one address. */
+export interface TryRecord {
+  n: number;
+  /** Until when the next try is refused (ms). */
+  until: number;
+  /** The last wrong try (ms). */
+  at: number;
+}
+
+/** Where wrong tries are kept: in the board's storage, so they outlast the room sleeping. */
+export interface TryStore {
+  get(who: string): TryRecord | undefined;
+  set(who: string, t: TryRecord): void;
+  delete(who: string): void;
+}
+
+/** A try store in memory (for tests). */
+export class MemoryTryStore implements TryStore {
+  private by = new Map<string, TryRecord>();
+  get = (who: string) => this.by.get(who);
+  set(who: string, t: TryRecord) {
+    this.by.set(who, t);
+    if (this.by.size > 5000) this.by.delete(this.by.keys().next().value!);
+  }
+  delete = (who: string) => void this.by.delete(who);
+}
+
+/** An address is forgotten a day after its last wrong try. */
+export const FORGET_TRIES_MS = 24 * 3600_000;
+
 /**
  * Wrong passwords, per address: five free tries, then a wait that doubles
- * from 30 seconds up to 15 minutes. Kept in memory, so a board that sleeps
- * forgets; waking it again takes long enough to slow guessing to a crawl.
+ * from 30 seconds up to 15 minutes. A try is counted before it is checked,
+ * so tries sent all at once still meet the wait; the right password clears
+ * the count.
  */
 export class Tries {
-  private by = new Map<string, { n: number; until: number }>();
+  constructor(private store: TryStore = new MemoryTryStore()) {}
 
   /** Seconds to wait before the next try from this address counts, or 0. */
-  wait(ip: string, now = Date.now()): number {
-    const t = this.by.get(ip);
+  wait(who: string, now = Date.now()): number {
+    const t = this.store.get(who);
     return t && t.until > now ? Math.ceil((t.until - now) / 1000) : 0;
   }
 
-  fail(ip: string, now = Date.now()): number {
-    const t = this.by.get(ip) ?? { n: 0, until: 0 };
+  /** Count a try. Returns the wait that follows it, in seconds. */
+  fail(who: string, now = Date.now()): number {
+    const old = this.store.get(who);
+    const t: TryRecord = old && now - old.at < FORGET_TRIES_MS ? { ...old } : { n: 0, until: 0, at: now };
     t.n++;
+    t.at = now;
     if (t.n >= 5) t.until = now + Math.min(15 * 60_000, 30_000 * 2 ** (t.n - 5));
-    this.by.set(ip, t);
-    if (this.by.size > 5000) this.by.delete(this.by.keys().next().value!);
-    return this.wait(ip, now);
+    this.store.set(who, t);
+    return this.wait(who, now);
   }
 
-  clear(ip: string) {
-    this.by.delete(ip);
+  clear(who: string) {
+    if (this.store.get(who)) this.store.delete(who);
   }
+}
+
+/** How a socket's address is kept: a short hash, never the address itself. */
+export async function addressKey(ip: string | null | undefined): Promise<string> {
+  return (await sha256(`longtable:${ip ?? "local"}`)).slice(0, 20);
 }

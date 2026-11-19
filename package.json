@@ -3,7 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "description": "Longtable: a live, shared planning board that tidies into a week.",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/s045pd/longtable.git"
+  },
   "type": "module",
   "scripts": {
     "setup": "node scripts/deploy-cloudflare.mjs",

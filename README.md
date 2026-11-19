@@ -1,150 +1,257 @@
+<div align="center">
+
+<img src="public/favicon.svg" width="72" height="72" alt="" />
+
 # Longtable
 
-**Plan it together.** Longtable is a live, shared planning board. Everyone on a
-board writes sticky notes at once and sees each other's cursors, names and
-typing as it happens. When the mess is done, one click on **Tidy up** files
-every note into the day it names, Monday to Sunday, in time order, and the week
-can go out as text, a spreadsheet or a calendar file.
+**Plan it together. Then one click sorts the mess into a week.**
 
-The first board it ships with is the example from the film it grew out of:
-**Pell & Rye · Opening week**, a fictional bakery planning its first week with
-five fictional people.
+A live, shared planning board: everyone writes sticky notes at once and sees each
+other's cursors and typing. **Tidy up** files every note into the day it names,
+and the week goes out as text, a spreadsheet or a calendar.
 
-> Status: preview. The repository is private until the first public release.
+**English** · [简体中文](README.zh-CN.md)
 
-## What you can do
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/s045pd/longtable)
+&nbsp;
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-ECE9E2?style=flat-square&labelColor=17181C)](LICENSE)
+[![Runs on the Cloudflare free plan](https://img.shields.io/badge/runs%20on-Cloudflare%20free%20plan-FFB38A?style=flat-square&labelColor=17181C)](DEPLOY.md#what-the-free-plan-covers)
+[![No accounts](https://img.shields.io/badge/accounts-none-9DF0C4?style=flat-square&labelColor=17181C)](#private-by-default)
 
-- **Plan live with anyone who has the link.** No accounts: a board is a link.
-  Cursors carry a name flag and leave a short streak when they move fast;
-  people see what you select and the words you type, as you type them.
-- **Private by default.** A board's address alone opens nothing: its links
-  carry a secret key after the `#` (which never reaches a server). Share an
-  edit link, or a watch link that can look, point and react but never
-  change anything. Whoever starts a board owns it and can add a password,
-  change it, make new links (the old ones stop working at once), clear the
-  board or delete it from the server for good. Wrong passwords are slowed
-  down; the password is kept only as a salted hash.
-- **Notes, headings, checklists, pen.** Double-click the canvas for a note
-  (`N`), `T` for a heading, `C` for a checklist, `P` to draw. Drag to move,
-  drag the empty canvas to select several, `Alt`-drag to copy, paste a list of
-  lines to get one note per line.
-- **Vote and react.** Voting dots in your colour sit on a note; reactions float
-  up from your cursor for everyone.
-- **Tidy up.** Write the day on a note ("Flyers out Wed 8 am", "周四下午4点试吃")
-  and Tidy up springs every note into its day's column in a wave, notes
-  without a time first, then by time. Notes that name no day get an ANY DAY
-  column. Everything else lines up under the week. A second tidy keeps the
-  week and sorts new notes into it. One undo takes it all back.
-- **Pick the day by hand.** Select notes and press **Day** (or `D`, or click
-  the date on a note) to pick a day of the board's week, with its real date,
-  and a time. Or drag a note into a column of the week: it takes that day and
-  slots in. A picked day wins over the words and shows as a stamp on the note;
-  "Read from the words again" undoes the pick.
-- **The front page is the demo.** Opening Longtable (`/`, also `/demo`)
-  plays the whole story on a board of its own, in your tab only, where five
-  made-up people play out the whole story by themselves. They join one by one,
-  write, draw, drop photos, tick and vote at once while the camera follows the
-  busiest corner, two of them pull at the same note, and Ana selects
-  everything and presses Tidy up. Esc stops it and hands the board to you;
-  nothing there is saved. Afterwards: replay it, make your own board (the
-  example or a blank one) or open one of yours. Every board has a "Play the
-  demo" button in its corner; with reduced motion the front page shows the
-  tidied week and waits for Play. The written introduction is at `/about`.
-- **Follow someone.** Click a face in the top bar and your view follows theirs.
-- **Export the week.** Copy it as Markdown for a chat, or download a CSV or an
-  `.ics` calendar with timed and all-day events.
-- **Works offline for a while.** Changes made while the connection is down are
-  kept and sent when it comes back.
-- **Phones.** One finger pans, two pinch, tools sit at the bottom.
-- **Sample teammates.** On the example board, four made-up people can wander
-  the board on your screen only, so one person can see what planning together
-  looks like. They never change the board.
+<img src="docs/images/tidy.gif" width="860" alt="Five people's notes, scattered across a board, spring into seven day columns when Tidy up is pressed. The line “Opening week, sorted.” rises underneath." />
 
-Keyboard: `V` select · `N` note · `P` pen · `T` heading · `C` checklist ·
-`H` or hold `Space` to pan · `U` tidy up · `Enter` edit · `⌫` delete ·
-`⌘D` duplicate · `⌘Z` / `⇧⌘Z` undo, redo · `+` `−` zoom · `⇧1` fit · `⇧0` 100%.
+<sub>The front page plays this on its own: five made-up people plan a fictional bakery's opening week, then Ana presses Tidy up.</sub>
 
-## Run it
+</div>
 
-Requires Node 20 or newer.
+---
+
+## Contents
+
+- [What it does](#what-it-does)
+- [Private by default](#private-by-default)
+- [Run your own](#run-your-own)
+- [Keyboard](#keyboard)
+- [Develop](#develop)
+- [How it is built](#how-it-is-built)
+- [License and credits](#license-and-credits)
+
+## What it does
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+### Plan live, with anyone who has the link
+
+No sign-up: a board is a link. Cursors carry a name flag, selections show in
+each person's colour, and words appear on everyone's screen as they are typed.
+Click a face in the top bar and your view follows theirs.
+
+Double-click for a **note**, or pick a **heading**, **checklist** or **pen**.
+Drag to move, `Alt`-drag to copy, paste a list to get one note per line.
+Vote with dots in your colour and send reactions that float up from your
+cursor.
+
+</td>
+<td width="50%"><img src="docs/images/board.png" alt="The Pell &amp; Rye board with Eli's cursor on a note he selected and “Bo is typing…” over a new note." /></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/images/week.png" alt="The same board after Tidy up: seven day columns, Monday to Sunday, each with its date." /></td>
+<td width="50%" valign="top">
+
+### Tidy up into a week
+
+Write the day on a note, the way people do: “Flyers out Wed 8 am”,
+“Brass band Sat 10 am”, “周四下午4点试吃”. **Tidy up** springs every note
+into its day's column in a wave, untimed notes first, then by time. Notes
+with no day get an *Any day* column; photos, lists and headings line up
+under the week. Tidy again later and new notes slot into the week you have.
+One undo takes it all back.
+
+Prefer to choose? Press **Day** (`D`) to pick a day and time by hand, or drag
+a note into a column.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### Send the week anywhere
+
+**Export week** copies it as Markdown for a chat, or downloads a **CSV** for
+a spreadsheet or an **`.ics`** calendar with timed and all-day events. Set
+the week's start date and every note gets its real date.
+
+### Works on a phone, and offline for a while
+
+One finger pans, two pinch, the tools sit at the bottom. Changes made while
+the connection drops are kept and sent when it comes back.
+
+</td>
+<td width="50%"><img src="docs/images/export.png" alt="The Export the week dialog showing the week as a Markdown checklist, with buttons for CSV and calendar files." /></td>
+</tr>
+</table>
+
+## Private by default
+
+<table>
+<tr>
+<td width="50%"><img src="docs/images/share.png" alt="The Share dialog with an edit link and a watch link, and the board's password setting." /></td>
+<td width="50%"><img src="docs/images/password.png" alt="The screen someone with the link sees on a board that has a password." /></td>
+</tr>
+</table>
+
+A board's address opens nothing on its own. Its links carry a secret key after
+the `#`, and browsers never send that part to a server, so it stays out of
+logs. **Share** gives two links: one that can **edit**, and one that can
+**watch** (see everything live, point and react, but change nothing).
+
+Whoever starts a board owns it. Under **Share → Board settings** the owner can:
+
+- **add, change or remove a password.** Everyone else needs it once per
+  device, and changing it sends people who are on the board right then back
+  to the password screen.
+- **make new links.** The old ones stop working at once.
+- **clear the board** (Undo brings it back) or **delete it** from the server
+  for good.
+
+| | How |
+| --- | --- |
+| Link keys | 26 random characters (about 130 bits). The owner key is stored only as a SHA-256 hash. |
+| Passwords | PBKDF2-SHA-256 with 100,000 rounds and a salt for each board. After five wrong tries from one address the board waits 30 seconds, doubling up to 15 minutes. The count is kept in the board's storage for a day, under a hash of the address. |
+| Watch links | The server refuses every change sent with one, not just the page. |
+| Starting boards | Optional **team password**. Without one, an address can still start only 30 boards an hour. |
+| The pages | Strict Content-Security-Policy, no referrer, no framing, and every page asks not to be indexed. |
+| Deleting | Erases the board's storage. Only the date it was deleted is kept, so its link can say so. |
+
+To put the whole site behind your company sign-in, add
+[Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/applications/configure-apps/self-hosted-public-app/)
+in front of it. It's free for up to 50 people.
+
+Found a security problem? See [SECURITY.md](SECURITY.md).
+
+## Run your own
+
+Longtable runs entirely on **Cloudflare's free plan**. One Worker serves the
+app and its API, and each board is a
+[Durable Object](https://developers.cloudflare.com/durable-objects/) with its
+own SQLite database. Your boards stay in your Cloudflare account, and no other
+service is involved.
+
+**With one API token** (you need Node.js 20 or newer):
+
+1. Make a token with this link, which fills in the two permissions it needs:
+   **[Create the Longtable token](https://dash.cloudflare.com/profile/api-tokens?permissionGroupKeys=%5B%7B%22key%22%3A%22workers_scripts%22%2C%22type%22%3A%22edit%22%7D%2C%7B%22key%22%3A%22account_settings%22%2C%22type%22%3A%22read%22%7D%5D&accountId=*&zoneId=all&name=Longtable%20deploy)**.
+2. In this folder, run:
+
+   ```sh
+   npm run setup
+   ```
+
+   Paste the token when asked (it isn't shown or saved). Setup finds your
+   account, asks for a name and an optional team password, then builds,
+   deploys and checks the result. It ends with your address:
+   `https://longtable.<your-subdomain>.workers.dev`.
+
+To update later, get the new code and run `npm run setup` again. Boards are kept.
+
+**Other ways:** the **Deploy to Cloudflare** button above (it copies the
+repository into your GitHub account, so it needs this repository to be
+public), a GitHub Actions workflow that deploys from your own copy, or
+`npx wrangler login` and `npm run deploy` by hand. [DEPLOY.md](DEPLOY.md)
+covers each one, plus your own domain, what the free plan covers and where
+the data is kept.
+
+## Keyboard
+
+| Key | Does | Key | Does |
+| --- | --- | --- | --- |
+| `V` | Select | `U` | Tidy up |
+| `N` | Note | `D` | Pick a day for the selection |
+| `T` | Heading | `Enter` | Edit the selected note |
+| `C` | Checklist | `Delete` | Delete |
+| `P` | Pen | Arrows | Nudge (`Shift` for more) |
+| `H` or hold `Space` | Pan | `⌘D` | Duplicate |
+| `+` `−` | Zoom | `⌘A` | Select everything |
+| `⇧1` / `⇧0` | Fit all / 100% | `⌘Z` / `⇧⌘Z` | Undo / redo |
+
+`Esc` stops the demo and hands its board to you. On Windows and Linux use `Ctrl` for `⌘`.
+
+## Develop
 
 ```sh
 npm install
-npm run dev:worker   # builds, then serves the app and live boards at http://localhost:8787
+npm run dev:worker     # builds, then serves the app with live boards at http://localhost:8787
+npm run dev            # the front end alone, with hot reload; boards stay in this browser
 ```
-
-`npm run dev` serves the front end alone with hot reload; boards are then kept
-in this browser (and shared between its tabs) instead of on a server.
-
-## Test it
 
 ```sh
-npm test             # unit tests: day and time reading, the tidy, checks, exports
-npm run typecheck
-npm run build && npm run e2e   # several browsers and a phone against a local Worker
+npm test               # unit tests: reading days and times, the tidy, checks, exports, access
+npm run typecheck      # the app and the Worker
+npm run build && npm run e2e
 ```
 
-The end-to-end run uses Playwright's Chromium (`npx playwright install chromium`
-once if you do not have it). It covers the privacy rules too: keyless and
-made-up links, the watch link (also against a script talking to the server
-directly), passwords and the wait after wrong ones, new links, clear, delete,
-the team password and the security headers. Point it at a deployed
-Longtable with `BASE_URL=https://… npm run e2e` (add `TEAM_PASSWORD=…` if it
-has one).
-
-## Deploy your own
-
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/s045pd/longtable)
-
-Longtable runs on Cloudflare's free plan: a Worker serves the app and the
-API, and each board is a
-[Durable Object](https://developers.cloudflare.com/durable-objects/) with its
-own SQLite storage and hibernating WebSockets. With one Cloudflare API token:
-
-```sh
-npm run setup      # asks for the token, then installs, builds, deploys and prints your address
-```
-
-[DEPLOY.md](DEPLOY.md) has the token link (the two permissions it needs,
-filled in), the GitHub Actions way, the team password, your own domain,
-what the free plan covers, and where the data lives. (The button works once
-the repository is public.)
+The end-to-end run starts a local Worker and drives several browsers and a
+phone with Playwright (`npx playwright install chromium` once if needed). It
+covers live editing between people, the tidy, the export, and the privacy
+rules: keyless and made-up links, the watch link (also against a script
+talking to the server directly), passwords and the wait after wrong ones,
+guesses sent all at once, new links, clear, delete, the team password, the
+limit on new boards and the security headers. To test a deployed Longtable:
+`BASE_URL=https://… npm run e2e` (add `TEAM_PASSWORD=…` if it has one).
 
 ## How it is built
 
-```
-src/shared/   the model both sides share: items and ops (types.ts), the checks
-              every incoming change passes (schema.ts), applying and undoing
-              changes (state.ts), reading days and times (days.ts), the tidy
-              (tidy.ts), exports (exporter.ts), the example board (templates.ts)
-src/board/    the board in the browser: app.ts (state, actions, undo),
-              views.ts (DOM per item), input.ts (pointer, touch, keys),
-              editor.ts (typing), people.ts (cursors, reactions), chrome.ts
-              (bars, dialogs), net.ts (WebSocket link with reconnect, or a
-              local link for development), camera.ts and grid.ts, and
-              demo.ts (the front page's demo, played with all of the above)
-src/landing.ts  the written introduction (/about)
-worker/       index.ts (API and static files), room.ts (one board's room) and
-              access.ts (its keys, password and the wait after wrong tries)
-scripts/      deploy-cloudflare.mjs (npm run setup)
+```mermaid
+flowchart LR
+  subgraph browser [Each person's browser]
+    app["Board app<br/>TypeScript, no framework"]
+  end
+  subgraph cf [Your Cloudflare account]
+    worker["Worker<br/>app files and /api"]
+    gate["Start check<br/>team password, rate limit"]
+    room["Board room · Durable Object<br/>SQLite, hibernating WebSockets"]
+  end
+  app -- "start a board" --> worker
+  worker --> gate
+  app <-- "ops, cursors, reactions" --> room
 ```
 
-Every change is an op (`put`, `patch`, `del`, `vote`, `meta`). A browser
-applies its own ops at once, keeps their inverse for undo, and sends them; the
-room checks each op against the schema, applies it in arrival order, passes
-it to everyone else, and writes what changed to storage at most once a second
-(so a drag is one write, not hundreds). Text, positions and colours are
-last-writer-wins per field; votes are per person, so two votes never collide.
-Presence (cursor, selection, what you are typing into, your view) is relayed
-but never stored.
+Every change is an **op**: `put`, `patch`, `del`, `vote` or `meta`. A browser
+applies its own ops at once, keeps their inverse for undo and sends them. The
+board's room checks each op against the schema, applies it in arrival order,
+passes it to everyone else, and writes what changed to storage at most once a
+second, so a drag is one write rather than hundreds. Text, positions and
+colours are last-writer-wins per field; votes belong to each person, so two
+votes never collide. Cursors, selections and who is online are relayed but
+never stored. Idle tabs keep their socket without waking the room, so an open
+but quiet board costs nothing.
 
-The look comes from the film: a dark canvas `#17181C` with a dot grid that
-coarsens as you zoom out, notes in five sherbet colours with dark ink, Inter
-for the interface, Bricolage Grotesque for the closing line, Caveat for
-handwritten captions. All fonts are bundled from Fontsource (SIL Open Font
-License).
+```
+src/shared/   the model both sides share: items and ops, the checks every change passes,
+              applying and undoing, reading days and times, the tidy, exports, templates
+src/board/    the board in the browser: state and undo (app.ts), items (views.ts), pointer,
+              touch and keys (input.ts), typing (editor.ts), cursors (people.ts), bars and
+              dialogs (chrome.ts), the connection (net.ts), the front page's demo (demo.ts)
+worker/       the API and static files (index.ts), one board's room (room.ts),
+              keys, passwords and wrong tries (access.ts)
+scripts/      npm run setup (deploy-cloudflare.mjs)
+e2e/          the end-to-end run
+```
 
-## License
+The look comes from the film Longtable grew out of: a dark canvas with a dot
+grid that coarsens as you zoom out, notes in five sherbet colours with dark
+ink, Inter for the interface, Bricolage Grotesque for the closing line and
+Caveat for handwritten captions.
 
-MIT. Pell & Rye, the people on its board and everything they plan are
-fictional.
+## License and credits
+
+Copyright © 2026 s045pd. Longtable is free software under the
+[GNU Affero General Public License v3.0](LICENSE): use it, change it and run
+it for your team as you like. If you run a changed version for other people
+over a network, offer them the source of your changes too.
+
+The fonts are bundled from [Fontsource](https://fontsource.org) under the SIL
+Open Font License: Inter, Bricolage Grotesque, Caveat and JetBrains Mono.
+Pell & Rye, the people on its board and everything they plan are fictional.

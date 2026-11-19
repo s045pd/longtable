@@ -906,7 +906,7 @@ export class Chrome {
       <p class="muted">${had ? "Everyone but you will be asked for the new one, including whoever is on the board now." : "People who open a link will be asked for it, once per device. Whoever is on the board now, except you, is asked straight away."} Send it separately from the link.</p>
       <form class="pw-form">
         <label class="field"><span>${had ? "New password" : "Password"}</span><input type="password" name="pw" minlength="6" maxlength="200" autocomplete="new-password" required placeholder="At least 6 characters" /></label>
-        <label class="show"><input type="checkbox" name="show" /> Show it</label>
+        <label class="reveal"><input type="checkbox" name="show" /> Show it</label>
         <p class="form-error" aria-live="polite"></p>
         <div class="actions"><button type="button" class="btn ghost" data-close>Cancel</button><button class="btn primary" type="submit">${had ? "Change it" : "Set the password"}</button></div>
       </form>`,
@@ -1041,6 +1041,7 @@ export class Chrome {
 
   /** Said, now and then, when the watch link tries to change something. */
   viewOnly() {
+    if (this.board.access?.role !== "viewer" || !this.board.ready) return;
     const now = Date.now();
     if (now - this.viewOnlyAt < 4000) return;
     this.viewOnlyAt = now;
@@ -1170,7 +1171,7 @@ export class Chrome {
     date.addEventListener("change", () => {
       const m = meta();
       date.value = m.weekOf;
-      if (m.weekOf !== b.state.meta.weekOf) b.setMeta({ weekOf: m.weekOf });
+      if (m.weekOf !== b.state.meta.weekOf && !b.readOnly) b.setMeta({ weekOf: m.weekOf });
       render();
     });
     d.el.querySelector(".actions")!.addEventListener("click", async (e) => {

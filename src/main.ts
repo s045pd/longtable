@@ -44,7 +44,10 @@ export async function startBoard(template: TemplateName, password?: string) {
   }
   const res = await fetch("/api/boards", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ template, ...(pw ? { password: pw } : {}) }) });
   if (res.status === 401 || res.status === 429) {
-    const body = (await res.json().catch(() => ({}))) as { wait?: number };
+    const body = (await res.json().catch(() => ({}))) as { error?: string; wait?: number };
+    if (body.error === "too-many-boards") {
+      return cantStart(`That’s a lot of new boards in one hour. You can start another in ${minutes(body.wait ?? 3600)}.`);
+    }
     try {
       localStorage.removeItem(TEAM);
     } catch {
@@ -75,7 +78,7 @@ function askTeamPassword(template: TemplateName, info: { wrong?: boolean; wait?:
     <p>Whoever runs this Longtable set one, so only their team can make boards here. Boards you’re sent a link to open without it.</p>
     <form class="team-form">
       <label class="field"><span>Team password</span><input type="password" name="pw" autocomplete="current-password" required /></label>
-      <p class="form-error" aria-live="polite">${info.wait ? `Too many tries: wait ${info.wait < 60 ? `${info.wait} s` : `${Math.ceil(info.wait / 60)} min`}.` : info.wrong ? "That’s not it. Try again." : ""}</p>
+      <p class="form-error" aria-live="polite">${info.wait ? `Too many tries: wait ${minutes(info.wait)}.` : info.wrong ? "That’s not it. Try again." : ""}</p>
       <div class="actions"><a class="btn ghost" href="/">Watch the demo</a><button class="btn primary" type="submit">Start the board</button></div>
     </form>
   </main>`;
@@ -84,8 +87,18 @@ function askTeamPassword(template: TemplateName, info: { wrong?: boolean; wait?:
   input.focus();
   form.addEventListener("submit", (e) => {
     e.preventDefault();
-    if (input.value) startBoard(template, input.value).catch(() => (location.href = "/"));
+    if (input.value) startBoard(template, input.value).catch(() => cantStart());
   });
+}
+
+const minutes = (s: number) => (s < 60 ? `${s} s` : `${Math.ceil(s / 60)} min`);
+
+/** Starting a board didn't work: say so, rather than leave a blank page. */
+function cantStart(why = "Longtable couldn’t reach its server. Check your connection and try again.") {
+  app.className = "landing";
+  app.innerHTML = `<main class="lost"><h1>The board didn’t start</h1><p></p><div class="actions"><a class="btn ghost" href="/">Go to Longtable</a><button class="btn primary" type="button">Try again</button></div></main>`;
+  app.querySelector("p")!.textContent = why;
+  app.querySelector("button")!.addEventListener("click", () => location.reload());
 }
 
 function route() {
@@ -111,7 +124,7 @@ function route() {
   }
   if (location.pathname === "/new") {
     const t = params.get("template");
-    startBoard((TEMPLATES as readonly string[]).includes(t ?? "") ? (t as TemplateName) : "blank").catch(() => (location.href = "/"));
+    startBoard((TEMPLATES as readonly string[]).includes(t ?? "") ? (t as TemplateName) : "blank").catch(() => cantStart());
     return;
   }
   // The old front page, with the pitch and the feature cards.
