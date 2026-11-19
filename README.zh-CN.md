@@ -20,7 +20,10 @@
 
 **大约一分钟部署完。** 部署日志最后会打印你的网址和密码：**`longtable`**，进去后改成你自己的。[部署完之后 ↓](#部署完之后)
 
-<img src="docs/images/longtable.webp" width="860" alt="五个人在同一块白板上筹备一家面包店的开业周：带名字的光标写便签、勾清单、放照片，按下 Tidy up 后所有便签弹进周一到周日七列，下方升起一行字 “Opening week, sorted.”" />
+<picture>
+  <source srcset="docs/images/longtable.avif" type="image/avif" />
+  <img src="docs/images/longtable.webp" width="860" alt="五个人在同一块白板上筹备一家面包店的开业周：带名字的光标写便签、勾清单、放照片，按下 Tidy up 后所有便签弹进周一到周日七列，下方升起一行字 “Opening week, sorted.”" />
+</picture>
 
 <sub>Longtable 就是从这支短片长出来的：五个虚构的人给一家虚构的面包店排开业周，最后 Ana 按下 Tidy up。首页会用真的白板把同一个故事现场演一遍。</sub>
 

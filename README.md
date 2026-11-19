@@ -21,7 +21,10 @@ calendar. Your AI assistant can plan on it too, over MCP.
 
 **Deploys in about a minute.** The log ends with your address and the password: **`longtable`**, until you pick your own. [After you deploy ↓](#after-you-deploy)
 
-<img src="docs/images/longtable.webp" width="860" alt="Five people plan a bakery’s opening week on one board: cursors with name flags write notes, tick a checklist and drop photos, then Tidy up springs every note into seven day columns and “Opening week, sorted.” rises underneath." />
+<picture>
+  <source srcset="docs/images/longtable.avif" type="image/avif" />
+  <img src="docs/images/longtable.webp" width="860" alt="Five people plan a bakery’s opening week on one board: cursors with name flags write notes, tick a checklist and drop photos, then Tidy up springs every note into seven day columns and “Opening week, sorted.” rises underneath." />
+</picture>
 
 <sub>The film Longtable grew out of: five made-up people plan a fictional bakery’s opening week, then Ana presses Tidy up. The front page plays the same story live.</sub>
 
