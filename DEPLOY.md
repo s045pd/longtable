@@ -174,7 +174,8 @@ One address can make 600 requests an hour to a board.
   When the allowance is used up, or without the binding, the assistant gets
   the week as text instead.
 - **To turn pictures off,** delete the `browser` block from `wrangler.jsonc`
-  and deploy again. The rest of MCP keeps working.
+  and deploy again. The rest of MCP keeps working. Do the same if a deploy
+  ever stops at the `browser` binding.
 
 ## Your own domain
 
